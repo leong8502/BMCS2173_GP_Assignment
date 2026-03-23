@@ -1,0 +1,12 @@
+x64/
+[Dd]ebug/
+*.pdb
+*.idb
+*.ilk
+*.iobj
+*.ipdb
+*.log
+*.tlog
+*.lastbuildstate
+
+.vs/

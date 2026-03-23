@@ -8,11 +8,25 @@
 
 #define WINDOW_TITLE "OpenGL Window"
 
-float angle = 0.0f;
+//--------------------------------
+// Camera variables
+//--------------------------------
 
-float cameraX = 0.0f;
-float cameraY = 2.0f;
-float cameraZ = 8.0f;
+float cameraAngle = 0.0f;
+float cameraHeight = 2.0f;
+float cameraDistance = 8.0f;
+
+float cameraX, cameraY, cameraZ;
+
+//--------------------------------
+// Character joint variables
+//--------------------------------
+
+float leftArmAngle = 0.0f;
+float rightArmAngle = 0.0f;
+
+float leftLegAngle = 0.0f;
+float rightLegAngle = 0.0f;
 
 LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -23,10 +37,38 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		break;
 
 	case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE) PostQuitMessage(0);
-		break;
 
-	default:
+		switch (wParam)
+		{
+		case VK_ESCAPE:
+			PostQuitMessage(0);
+			break;
+
+		case 'A':
+			cameraAngle -= 0.05f;
+			break;
+
+		case 'D':
+			cameraAngle += 0.05f;
+			break;
+
+		case 'W':
+			cameraDistance -= 0.3f;
+			break;
+
+		case 'S':
+			cameraDistance += 0.3f;
+			break;
+
+		case VK_UP:
+			cameraHeight += 0.3f;
+			break;
+
+		case VK_DOWN:
+			cameraHeight -= 0.3f;
+			break;
+
+		}
 		break;
 	}
 
@@ -85,11 +127,141 @@ void initOpenGL()
 	glMatrixMode(GL_MODELVIEW);
 }
 
+void updateCamera()
+{
+	cameraX = sin(cameraAngle) * cameraDistance;
+	cameraZ = cos(cameraAngle) * cameraDistance;
+	cameraY = cameraHeight;
+}
+
+void drawHead()
+{
+	GLUquadric* quad = gluNewQuadric();
+
+	glPushMatrix();
+
+	glColor3f(1.0f, 0.8f, 0.6f);
+	glTranslatef(0.0f, 1.6f, 0.0f);
+
+	gluSphere(quad, 0.4, 32, 32);
+
+	glPopMatrix();
+}
+
+void drawBody()
+{
+	GLUquadric* quad = gluNewQuadric();
+
+	glPushMatrix();
+
+	glColor3f(0.3f, 0.3f, 1.0f);
+
+	glTranslatef(0.0f, 0.8f, 0.0f);
+
+	glRotatef(-90, 1, 0, 0);
+
+	gluCylinder(quad, 0.5, 0.5, 1.2, 32, 32);
+
+	glPopMatrix();
+}
+
+void drawLeftArm()
+{
+	GLUquadric* quad = gluNewQuadric();
+
+	glPushMatrix();
+
+	glTranslatef(-0.7f, 1.3f, 0.0f);
+
+	glRotatef(leftArmAngle, 1, 0, 0);
+
+	glRotatef(-90, 1, 0, 0);
+
+	glColor3f(0.9f, 0.8f, 0.7f);
+
+	gluCylinder(quad, 0.15, 0.15, 0.8, 32, 32);
+
+	glPopMatrix();
+}
+
+void drawRightArm()
+{
+	GLUquadric* quad = gluNewQuadric();
+
+	glPushMatrix();
+
+	glTranslatef(0.7f, 1.3f, 0.0f);
+
+	glRotatef(rightArmAngle, 1, 0, 0);
+
+	glRotatef(-90, 1, 0, 0);
+
+	glColor3f(0.9f, 0.8f, 0.7f);
+
+	gluCylinder(quad, 0.15, 0.15, 0.8, 32, 32);
+
+	glPopMatrix();
+}
+
+void drawLeftLeg()
+{
+	GLUquadric* quad = gluNewQuadric();
+
+	glPushMatrix();
+
+	glTranslatef(-0.25f, 0.0f, 0.0f);
+
+	glRotatef(leftLegAngle, 1, 0, 0);
+
+	glRotatef(-90, 1, 0, 0);
+
+	glColor3f(0.2f, 0.2f, 0.8f);
+
+	gluCylinder(quad, 0.18, 0.18, 1.0, 32, 32);
+
+	glPopMatrix();
+}
+
+void drawRightLeg()
+{
+	GLUquadric* quad = gluNewQuadric();
+
+	glPushMatrix();
+
+	glTranslatef(0.25f, 0.0f, 0.0f);
+
+	glRotatef(rightLegAngle, 1, 0, 0);
+
+	glRotatef(-90, 1, 0, 0);
+
+	glColor3f(0.2f, 0.2f, 0.8f);
+
+	gluCylinder(quad, 0.18, 0.18, 1.0, 32, 32);
+
+	glPopMatrix();
+}
+
+void drawCharacter()
+{
+	glPushMatrix();
+
+	drawHead();
+	drawBody();
+	drawLeftArm();
+	drawRightArm();
+	drawLeftLeg();
+	drawRightLeg();
+
+	glPopMatrix();
+}
+
 void display()
 {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glLoadIdentity();
+
+	updateCamera();
 
 	gluLookAt(
 		cameraX, cameraY, cameraZ,
@@ -97,16 +269,8 @@ void display()
 		0, 1, 0
 	);
 
-	// simple test object
-	glColor3f(0.2f, 0.6f, 1.0f);
+	drawCharacter();
 
-	glPushMatrix();
-	glRotatef(angle, 0, 1, 0);
-	GLUquadric* quad = gluNewQuadric();
-	gluSphere(quad, 1, 32, 32);
-	glPopMatrix();
-
-	angle += 0.3f;
 }
 //--------------------------------------------------------------------
 
