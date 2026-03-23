@@ -28,6 +28,41 @@ float rightArmAngle = 0.0f;
 float leftLegAngle = 0.0f;
 float rightLegAngle = 0.0f;
 
+void updateCamera()
+{
+	cameraX = sin(cameraAngle) * cameraDistance;
+	cameraZ = cos(cameraAngle) * cameraDistance;
+	cameraY = cameraHeight;
+}
+
+void resetAll() {
+
+	//--------------------------------
+	// Camera variables
+	//--------------------------------
+
+	cameraAngle = 0.0f;
+	cameraHeight = 2.0f;
+	cameraDistance = 8.0f;
+
+	cameraX = 0.0f;
+	cameraY = 2.0f;
+	cameraZ = 8.0f;
+
+	//--------------------------------
+	// Character joint variables
+	//--------------------------------
+
+	leftArmAngle = 0.0f;
+	rightArmAngle = 0.0f;
+
+	leftLegAngle = 0.0f;
+	rightLegAngle = 0.0f;
+
+	updateCamera();
+
+}
+
 LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
@@ -42,6 +77,11 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		{
 		case VK_ESCAPE:
 			PostQuitMessage(0);
+			break;
+
+		case VK_SPACE:
+			MessageBeep(MB_OK);
+			resetAll();
 			break;
 
 		case 'A':
@@ -125,13 +165,6 @@ void initOpenGL()
 	);
 
 	glMatrixMode(GL_MODELVIEW);
-}
-
-void updateCamera()
-{
-	cameraX = sin(cameraAngle) * cameraDistance;
-	cameraZ = cos(cameraAngle) * cameraDistance;
-	cameraY = cameraHeight;
 }
 
 void drawHead()
