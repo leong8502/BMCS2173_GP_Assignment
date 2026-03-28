@@ -142,11 +142,13 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			cameraHeight -= 0.3f;
 			break;
 
-		case VK_OEM_PLUS: // press + / =
+		case VK_ADD: // press + / =
+		case VK_OEM_PLUS:
 			cameraDistance -= 0.3f;
 			break;
 
-		case VK_OEM_MINUS: // press - / _
+		case VK_SUBTRACT: // press - / _
+		case VK_OEM_MINUS:
 			cameraDistance += 0.3f;
 			break;
 
@@ -322,13 +324,13 @@ void drawLeftArm()
 
 	glRotatef(leftArmAngle, 1, 0, 0);
 
-	glRotatef(-90, 1, 0, 0);
+	glRotatef(90, 1, 0, 0);
 
 	glColor3f(0.9f, 0.8f, 0.7f);
 
 	gluCylinder(quad, 0.15, 0.15, 0.8, 32, 32);
 
-	glTranslatef(0.0f, 0.0f, -0.8f);
+	glTranslatef(0.0f, 0.0f, 0.8f);
 	glColor3f(1.0f, 0.8f, 0.6f);
 	gluSphere(quad, 0.15, 16, 16);
 
@@ -345,13 +347,13 @@ void drawRightArm()
 
 	glRotatef(rightArmAngle, 1, 0, 0);
 
-	glRotatef(-90, 1, 0, 0);
+	glRotatef(90, 1, 0, 0);
 
 	glColor3f(0.9f, 0.8f, 0.7f);
 
 	gluCylinder(quad, 0.15, 0.15, 0.8, 32, 32);
 
-	glTranslatef(0.0f, 0.0f, -0.8f);
+	glTranslatef(0.0f, 0.0f, 0.8f);
 	glColor3f(1.0f, 0.8f, 0.6f);
 	gluSphere(quad, 0.15, 16, 16);
 
@@ -364,11 +366,11 @@ void drawLeftLeg()
 
 	glPushMatrix();
 
-	glTranslatef(-0.25f, 0.0f, 0.0f);
+	glTranslatef(-0.25f, 0.8f, 0.0f);
 
 	glRotatef(leftLegAngle, 1, 0, 0);
 
-	glRotatef(-90, 1, 0, 0);
+	glRotatef(90, 1, 0, 0);
 
 	if (outfitColor == 1)
 		glColor3f(0.3f, 0.3f, 1.0f); // blue
@@ -379,9 +381,9 @@ void drawLeftLeg()
 	if (outfitColor == 3)
 		glColor3f(0.3f, 1.0f, 0.3f); // green
 
-	gluCylinder(quad, 0.18, 0.18, 1.0, 32, 32);
+	gluCylinder(quad, 0.18, 0.18, 0.8, 32, 32);
 
-	glTranslatef(0.0f, 0.0f, -1.0f);
+	glTranslatef(0.0f, 0.0f, 0.8f);
 	glColor3f(0.1f, 0.1f, 0.4f);
 	gluSphere(quad, 0.2, 16, 16);
 
@@ -394,11 +396,11 @@ void drawRightLeg()
 
 	glPushMatrix();
 
-	glTranslatef(0.25f, 0.0f, 0.0f);
+	glTranslatef(0.25f, 0.8f, 0.0f);
 
 	glRotatef(rightLegAngle, 1, 0, 0);
 
-	glRotatef(-90, 1, 0, 0);
+	glRotatef(90, 1, 0, 0);
 
 	if (outfitColor == 1)
 		glColor3f(0.3f, 0.3f, 1.0f); // blue
@@ -409,9 +411,9 @@ void drawRightLeg()
 	if (outfitColor == 3)
 		glColor3f(0.3f, 1.0f, 0.3f); // green
 
-	gluCylinder(quad, 0.18, 0.18, 1.0, 32, 32);
+	gluCylinder(quad, 0.18, 0.18, 0.8, 32, 32);
 
-	glTranslatef(0.0f, 0.0f, -1.0f);
+	glTranslatef(0.0f, 0.0f, 0.8f);
 	glColor3f(0.1f, 0.1f, 0.4f);
 	gluSphere(quad, 0.2, 16, 16);
 
@@ -471,8 +473,6 @@ void drawGround()
 
 void updateAnimation()
 {
-	leftLegAngle = sin(GetTickCount() * 0.005) * 30;
-	rightLegAngle = -sin(GetTickCount() * 0.005) * 30;
 
 	if (attackAnimation)
 	{
