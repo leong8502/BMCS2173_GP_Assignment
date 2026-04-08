@@ -8,7 +8,7 @@
 #pragma warning(disable:4996)
 #pragma comment (lib, "OpenGL32.lib")
 
-#define WINDOW_TITLE "OpenGL Window"
+#define WINDOW_TITLE "Arms Part"
 
 //--------------------------------
 // Camera variables

@@ -6,7 +6,7 @@
 
 #pragma comment (lib, "OpenGL32.lib")
 
-#define WINDOW_TITLE "OpenGL Window"
+#define WINDOW_TITLE "Main Character"
 
 //--------------------------------
 // Camera variables
