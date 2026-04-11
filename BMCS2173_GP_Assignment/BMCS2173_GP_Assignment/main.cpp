@@ -238,7 +238,7 @@ bool initPixelFormat(HDC hdc)
 
 void initOpenGL()
 {
-	glClearColor(0.1f, 0.1f, 0.2f, 1.0f); // background color
+	glClearColor(0.45f, 0.72f, 0.95f, 1.0f); // Sky blue background
 
 	glEnable(GL_DEPTH_TEST); // enable depth for 3D
 
