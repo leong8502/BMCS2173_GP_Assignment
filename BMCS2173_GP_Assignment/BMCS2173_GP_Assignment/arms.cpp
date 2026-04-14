@@ -66,7 +66,10 @@ void updateAnimation() {
 // Texture
 //--------------------------------
 
-GLuint textureID;
+GLuint texSkin;
+GLuint texFabric;
+GLuint texGold;
+GLuint texWhiteSleeve;
 
 void updateCamera()
 {
@@ -270,7 +273,7 @@ void initOpenGL()
 	glEnable(GL_TEXTURE_2D);
 }
 
-void drawProceduralArmPart(float length, float topRx, float topRy, float bottomRx, float bottomRy, int slices, int stacks, float bulgeFactor, float bulgePos) {
+void drawProceduralArmPart(float length, float topRx, float topRy, float bottomRx, float bottomRy, int slices, int stacks, float bulgeFactor, float bulgePos, float sweepStart = 0.0f, float sweepEnd = 2.0f * 3.14159265f, float pleatDepth = 0.0f, int pleatCount = 0) {
 	for (int i = 0; i < stacks; ++i) {
 		float t1 = (float)i / stacks;
 		float t2 = (float)(i + 1) / stacks;
@@ -291,7 +294,8 @@ void drawProceduralArmPart(float length, float topRx, float topRy, float bottomR
 
 		glBegin(GL_QUAD_STRIP);
 		for (int j = 0; j <= slices; ++j) {
-			float theta = (float)j / slices * 2.0f * 3.14159265f;
+			float t_sweep = (float)j / slices;
+			float theta = sweepStart * (1.0f - t_sweep) + sweepEnd * t_sweep;
 			float cosT = cos(theta);
 			float sinT = sin(theta);
 
@@ -299,7 +303,23 @@ void drawProceduralArmPart(float length, float topRx, float topRy, float bottomR
 			float v1 = t1;
 			float v2 = t2;
 
-			// Elliptical normal calculation
+			float pMod = (pleatCount > 0) ? cos(theta * pleatCount) : 0.0f;
+			float r_offset1 = pMod * pleatDepth * t1;
+			float r_offset2 = pMod * pleatDepth * t2;
+
+			float rx1p = rx1 + r_offset1;
+			float ry1p = ry1 + r_offset1;
+			float rx2p = rx2 + r_offset2;
+			float ry2p = ry2 + r_offset2;
+
+			float shade = 1.0f;
+			if (pleatCount > 0) {
+				// Shading also scales with t to avoid harsh edges at top
+				float pShade = 0.75f + 0.25f * (pMod * 0.5f + 0.5f);
+				shade = 1.0f * (1.0f - t1) + pShade * t1; 
+			}
+
+			// Elliptical normal calculation (using base radii for smooth light)
 			float avgR1 = (rx1 + ry1) * 0.5f;
 			float nx1 = ry1 * cosT; float ny1 = rx1 * sinT; float nz1 = (topRx - bottomRx) / length * avgR1;
 			float len1 = sqrt(nx1 * nx1 + ny1 * ny1 + nz1 * nz1);
@@ -310,22 +330,24 @@ void drawProceduralArmPart(float length, float topRx, float topRy, float bottomR
 			float len2 = sqrt(nx2 * nx2 + ny2 * ny2 + nz2 * nz2);
 			if (len2 > 0) { nx2 /= len2; ny2 /= len2; nz2 /= len2; }
 
+			glColor3f(shade, shade, shade);
 			glNormal3f(nx2, ny2, nz2);
 			glTexCoord2f(u, v2);
-			glVertex3f(rx2 * cosT, ry2 * sinT, z2);
+			glVertex3f(rx2p * cosT, ry2p * sinT, z2);
 
 			glNormal3f(nx1, ny1, nz1);
 			glTexCoord2f(u, v1);
-			glVertex3f(rx1 * cosT, ry1 * sinT, z1);
+			glVertex3f(rx1p * cosT, ry1p * sinT, z1);
 		}
 		glEnd();
+		glColor3f(1.0f, 1.0f, 1.0f); // Reset color for other parts
 	}
 }
 
 void drawProceduralArmBase(bool isLeft, float fistProgress) {
     // Note: glRotatef sets the starting angle. 
     // Hand will be constructed pointing down +Z in this local space.
-	glBindTexture(GL_TEXTURE_2D, textureID);
+	glBindTexture(GL_TEXTURE_2D, texSkin);
 	glColor3f(1.0f, 1.0f, 1.0f); 
 
 	// Upper arm
@@ -343,16 +365,151 @@ void drawProceduralArmBase(bool isLeft, float fistProgress) {
 	glEnd();
 	glPopMatrix();
 
+	// ------------------------------------------
+	// START CLOTHING ADDITIONS (UPPER ARM)
+	// ------------------------------------------
+	glDisable(GL_TEXTURE_2D);
+
+	// 1. Dark Blue Upper Sleeve Cover (slightly larger than arm)
+	glBindTexture(GL_TEXTURE_2D, texFabric);
+	glEnable(GL_TEXTURE_2D);
+	glColor3f(1.0f, 1.0f, 1.0f); 
+	glPushMatrix();
+	glRotatef(isLeft ? 5.0f : -5.0f, 0, 1, 0);
+	drawProceduralArmPart(0.53f, 0.105f, 0.105f, 0.08f, 0.08f, 40, 20, 0.015f, 0.5f);
+	glPopMatrix();
+
+	// 2. Shoulder Shield (Pauldron)
+	glPushMatrix();
+	glTranslatef(isLeft ? -0.115f : 0.115f, 0.0f, 0.05f);
+	glRotatef(isLeft ? -15.0f : 15.0f, 0, 1, 0); // Outward spread
+	glRotatef(10.0f, 1, 0, 0);
+
+	float peakZ = 0.25f;
+	float peakX = isLeft ? -0.06f : 0.06f; 
+	float width = 0.13f;
+
+	glColor3f(0.2f, 0.22f, 0.3f); // Slate dark blue/grey
+	glBegin(GL_TRIANGLES);
+	// Outer side (away from arm)
+	float nx = isLeft ? -1.0f : 1.0f;
+	glNormal3f(nx, 0.0f, 0.0f);
+
+	// Top half
+	glVertex3f(0.0f, 0.0f, -0.08f); 
+	glVertex3f(0.0f, -width, 0.1f);
+	glVertex3f(peakX, 0.0f, peakZ);
+
+	glVertex3f(0.0f, 0.0f, -0.08f); 
+	glVertex3f(peakX, 0.0f, peakZ);
+	glVertex3f(0.0f, width, 0.1f);
+
+	// Bottom half
+	glVertex3f(0.0f, -width, 0.1f);
+	glVertex3f(0.0f, 0.0f, 0.35f); 
+	glVertex3f(peakX, 0.0f, peakZ);
+
+	glVertex3f(0.0f, width, 0.1f);
+	glVertex3f(peakX, 0.0f, peakZ);
+	glVertex3f(0.0f, 0.0f, 0.35f);
+	glEnd();
+
+	// Gold trim for Pauldron
+	glBindTexture(GL_TEXTURE_2D, texGold);
+	glColor3f(1.0f, 1.0f, 1.0f);
+	float ox = isLeft ? -0.002f : 0.002f;
+	glLineWidth(3.0f);
+	glBegin(GL_LINE_LOOP);
+	glVertex3f(ox, 0.0f, -0.08f); 
+	glVertex3f(ox, -width, 0.1f);
+	glVertex3f(ox, 0.0f, 0.35f);
+	glVertex3f(ox, width, 0.1f);
+	glEnd();
+	glBegin(GL_LINE_STRIP);
+	glVertex3f(ox, 0.0f, -0.08f);
+	glVertex3f(peakX + ox, 0.0f, peakZ);
+	glVertex3f(ox, 0.0f, 0.35f);
+	glEnd();
+	glPopMatrix();
+
+	// 3. Gold Bicep Band
+	glPushMatrix();
+	glTranslatef(0.0f, 0.0f, 0.105f); // Positioned consistently
+	glRotatef(isLeft ? 5.0f : -5.0f, 0, 1, 0);
+	glTranslatef(isLeft ? 0.01f : -0.01f, 0.0f, 0.0f);
+	
+	glBindTexture(GL_TEXTURE_2D, texGold);
+	glColor3f(1.0f, 1.0f, 1.0f);
+	GLUquadric* q = gluNewQuadric();
+	gluQuadricTexture(q, GL_TRUE); // Enable texture for cylinder
+	gluCylinder(q, 0.110f, 0.105f, 0.045f, 30, 1);
+
+	gluDeleteQuadric(q);
+	glPopMatrix();
+	
+	// 4. White Flared Sleeve
+	glPushMatrix();
+	glRotatef(isLeft ? 5.0f : -5.0f, 0, 1, 0);
+	glTranslatef(0.0f, 0.0f, 0.35f); 
+	
+	// Dual Brown Bands (Top and Transition)
+	glDisable(GL_TEXTURE_2D);
+	glColor3f(0.25f, 0.15f, 0.05f); // Dark Brown
+	GLUquadric* qBand = gluNewQuadric();
+	gluQuadricNormals(qBand, GLU_SMOOTH);
+	
+	// 1. TOP BAND (at sleeve origin, visible over blue fabric)
+	glPushMatrix();
+	float bRTop = 0.115f; 
+	float bThickTop = 0.028f;
+	gluDisk(qBand, 0.08f, bRTop, 30, 1); 
+	gluCylinder(qBand, bRTop, bRTop, bThickTop, 30, 1); 
+	glTranslatef(0.0f, 0.0f, bThickTop);
+	gluDisk(qBand, 0.08f, bRTop, 30, 1); 
+	glPopMatrix();
+
+	// 2. BOTTOM BAND (at the blue fabric edge/transition)
+	glPushMatrix();
+	glTranslatef(0.0f, 0.0f, 0.16f); 
+	float bRBot = 0.122f; 
+	float bThickBot = 0.012f;
+	gluDisk(qBand, 0.08f, bRBot, 30, 1); 
+	gluCylinder(qBand, bRBot, bRBot, bThickBot, 30, 1); 
+	glTranslatef(0.0f, 0.0f, bThickBot);
+	gluDisk(qBand, 0.08f, bRBot, 30, 1); 
+	glPopMatrix();
+
+	gluDeleteQuadric(qBand);
+
+	// White Flared Sleeve with Pleats
+	glTranslatef(0.0f, 0.0f, 0.005f); // Minor offset to prevent Z-fighting with the band disk
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, texWhiteSleeve);
+	glColor3f(1.0f, 1.0f, 1.0f); 
+	drawProceduralArmPart(0.42f, 0.09f, 0.09f, 0.17f, 0.17f, 60, 30, 0.02f, 0.5f, 0.0f, 2.0f * 3.14159265f, 0.015f, 8); 
+	glDisable(GL_TEXTURE_2D);
+
+	glPopMatrix();
+	
+	glEnable(GL_TEXTURE_2D);
+	glColor3f(1.0f, 1.0f, 1.0f);
+	// ------------------------------------------
+	// END CLOTHING ADDITIONS (UPPER ARM)
+	// ------------------------------------------
+
 	// Rotate slightly outwards depending on left or right
 	glRotatef(isLeft ? 5.0f : -5.0f, 0, 1, 0);
 	drawProceduralArmPart(0.53f, 0.10f, 0.10f, 0.075f, 0.075f, 40, 40, 0.015f, 0.5f);
 
 	// Elbow joint
 	glTranslatef(0.0f, 0.0f, 0.53f);
+	glBindTexture(GL_TEXTURE_2D, texFabric);
+	glColor3f(1.0f, 1.0f, 1.0f);
 	GLUquadric* quad = gluNewQuadric();
 	gluQuadricTexture(quad, GL_TRUE);
 	gluQuadricNormals(quad, GLU_SMOOTH);
-	gluSphere(quad, 0.075f, 40, 40);
+	gluSphere(quad, 0.078f, 40, 40); 
+	glBindTexture(GL_TEXTURE_2D, texSkin);
 
 	// Forearm 
 	// Smoothly transitions from circular elbow to flattened wrist
@@ -361,8 +518,44 @@ void drawProceduralArmBase(bool isLeft, float fistProgress) {
 	float wristRy = 0.030f;
 	drawProceduralArmPart(0.53f, 0.075f, 0.075f, wristRx, wristRy, 40, 40, 0.012f, 0.3f); 
 
+	// ------------------------------------------
+	// START CLOTHING ADDITIONS (FOREARM)
+	// ------------------------------------------
+	
+	// Forearm dark blue sleeve
+	glBindTexture(GL_TEXTURE_2D, texFabric);
+	glColor3f(1.0f, 1.0f, 1.0f);
+	drawProceduralArmPart(0.53f, 0.078f, 0.078f, wristRx + 0.003f, wristRy + 0.003f, 40, 20, 0.012f, 0.3f);
+
+	// Gold rings at wrist
+	glPushMatrix();
+	glTranslatef(0.0f, 0.0f, 0.46f); // Near end of forearm 
+	glBindTexture(GL_TEXTURE_2D, texGold);
+	glColor3f(1.0f, 1.0f, 1.0f);
+	GLUquadric* qRings = gluNewQuadric();
+	gluQuadricTexture(qRings, GL_TRUE);
+	
+	for(int r = 0; r < 3; r++) {
+		glPushMatrix();
+		glTranslatef(0.0f, 0.0f, r * 0.015f); 
+		// Exact fit - forearm sleeve at this point is approx 0.052
+		glScalef(1.0f, 0.82f, 1.0f); 
+		gluCylinder(qRings, 0.053f, 0.053f, 0.010f, 30, 1);
+		glPopMatrix();
+	}
+	gluDeleteQuadric(qRings);
+	glPopMatrix();
+	
+	glBindTexture(GL_TEXTURE_2D, texSkin);
+	// ------------------------------------------
+	// END CLOTHING ADDITIONS (FOREARM)
+	// ------------------------------------------
+
 	// Wrist Joint 
 	glTranslatef(0.0f, 0.0f, 0.53f);
+
+	// Rotate hand so palms face inside
+	glRotatef(isLeft ? 90.0f : -90.0f, 0, 0, 1);
 
 	// Hand palm
 	float knuckleRx = 0.06f; 
@@ -526,11 +719,14 @@ void setupLighting()
 	glLightf(GL_LIGHT0, GL_SPOT_CUTOFF, 45.0f);
 }
 
-GLuint loadTexture()
+GLuint loadBMP(const char* filename)
 {
 	GLuint texture = 0;
-	FILE* file = fopen("skin.bmp", "rb");
-	if (!file) return 0;
+	FILE* file = fopen(filename, "rb");
+	if (!file) {
+		printf("Failed to open %s\n", filename);
+		return 0;
+	}
 	
 	unsigned char header[54];
 	if (fread(header, 1, 54, file) != 54) { fclose(file); return 0; }
@@ -628,8 +824,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
 	//	setup for Initial, Lighting and Texture
 	//--------------------------------
 	initOpenGL();
-	setupLighting();
-	textureID = loadTexture();
+	//setupLighting();
+	texSkin = loadBMP("skin.bmp");
+	texFabric = loadBMP("fabric.bmp");
+	texGold = loadBMP("gold.bmp");
+	texWhiteSleeve = loadBMP("white_sleeve.bmp");
 
 	//--------------------------------
 	//	End initialization
