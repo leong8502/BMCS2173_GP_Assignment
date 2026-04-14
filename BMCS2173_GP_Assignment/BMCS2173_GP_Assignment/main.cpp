@@ -11,6 +11,10 @@
 
 #define WINDOW_TITLE "Main Character"
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 //================================
 // Camera variables
 //================================
@@ -45,6 +49,11 @@ float walkPhase = 0.0f;
 float walkArmSwing = 0.0f;
 bool keys[256];
 
+bool weapon1_status = false; // Meteor Hammer equipped
+bool weapon2_status = false; // Fan equipped
+float fanSpreadAngle  = 0.0f;  // start folded
+float fanTargetAngle  = 0.0f;
+
 DWORD lastTime = 0;
 
 //================================
@@ -58,6 +67,13 @@ GLuint texGold;         // gold trim
 GLuint texWhiteSleeve;  // arm white sleeve
 GLuint texWhiteLeather; // boot white leather
 GLuint texDarkLeather;  // boot sole
+
+GLuint texWeaponMetal;  // weapon metal
+GLuint texWeaponWood;   // weapon wood
+GLuint texWeaponChain;  // weapon chain
+
+GLuint texFanWood;      // fan wood
+GLuint texFan;          // fan fabric
 
 // Body uses a display-list cache to avoid repeating heavy procedural math
 GLuint cachedBodyList = 0;
@@ -85,11 +101,15 @@ GLuint loadBMP(const char* filename)
     fread(data, 1, imageSize, file);
     fclose(file);
 
-    // BMP stores BGR; flip to RGB
-    for (int i = 0; i < imageSize; i += 3) {
-        unsigned char tmp = data[i];
-        data[i]     = data[i + 2];
-        data[i + 2] = tmp;
+    // BMP stores BGR; flip to RGB while respecting 4-byte row padding
+    int rowSize = ((width * 3) + 3) & ~3;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int i = y * rowSize + x * 3;
+            unsigned char tmp = data[i];
+            data[i]     = data[i + 2];
+            data[i + 2] = tmp;
+        }
     }
 
     glGenTextures(1, &texture);
@@ -133,7 +153,257 @@ void resetAll()
     walkPhase = 0.0f; walkArmSwing = 0.0f;
     for (int i = 0; i < 256; i++) keys[i] = false;
 
+    weapon1_status = false;
+    weapon2_status = false;
+    leftFistActive = false;
+    rightFistActive = false;
+    fanTargetAngle = 0.0f;
+
     updateCamera();
+}
+
+//================================
+// Weapon 1: Meteor Hammer logic
+//================================
+
+void getPathPoint(float t, float r, float L, float& px, float& py, float& nx, float& ny, float& traveled) {
+    float arcLen = (float)M_PI * r;
+    float totalLen = 2.0f * arcLen + 2.0f * L;
+    float dist = t * totalLen;
+    if (dist <= L) {
+        px = -L / 2.0f + dist; py = r; nx = 0.0f; ny = 1.0f; traveled = dist;
+    } else if (dist <= L + arcLen) {
+        float a = (dist - L) / r; float angle = (float)M_PI / 2.0f - a;
+        px = L / 2.0f + r * cos(angle); py = r * sin(angle); nx = cos(angle); ny = sin(angle); traveled = dist;
+    } else if (dist <= 2.0f * L + arcLen) {
+        float d = dist - (L + arcLen); px = L / 2.0f - d; py = -r; nx = 0.0f; ny = -1.0f; traveled = dist;
+    } else {
+        float d = dist - (2.0f * L + arcLen); float a = d / r; float angle = -(float)M_PI / 2.0f - a;
+        px = -L / 2.0f + r * cos(angle); py = r * sin(angle); nx = cos(angle); ny = sin(angle); traveled = dist;
+    }
+}
+
+void drawChainLink(GLUquadric* quad, float innerRadius, float outerRadius, float L, int nsides, int rings) {
+    float arcLen = (float)M_PI * outerRadius;
+    float totalLen = 2.0f * arcLen + 2.0f * L;
+    for (int i = 0; i < rings; i++) {
+        float t0 = (float)i / rings; float t1 = (float)(i + 1) / rings;
+        float px0, py0, nx0, ny0, dist0_path; getPathPoint(t0, outerRadius, L, px0, py0, nx0, ny0, dist0_path);
+        float px1, py1, nx1, ny1, dist1_path; getPathPoint(t1, outerRadius, L, px1, py1, nx1, ny1, dist1_path);
+        glBegin(GL_QUAD_STRIP);
+        for (int j = 0; j <= nsides; j++) {
+            float phi = (float)j * 2.0f * (float)M_PI / nsides;
+            float cosPhi = cos(phi); float sinPhi = sin(phi);
+            float n0x = nx0 * cosPhi; float n0y = ny0 * cosPhi; float n0z = sinPhi;
+            float v0x = px0 + innerRadius * n0x; float v0y = py0 + innerRadius * n0y; float v0z = innerRadius * n0z;
+            float tx0 = (float)j / nsides; float ty0 = dist0_path / totalLen * 4.0f;
+            glNormal3f(n0x, n0y, n0z); glTexCoord2f(tx0, ty0); glVertex3f(v0x, v0y, v0z);
+            float n1x = nx1 * cosPhi; float n1y = ny1 * cosPhi; float n1z = sinPhi;
+            float v1x = px1 + innerRadius * n1x; float v1y = py1 + innerRadius * n1y; float v1z = innerRadius * n1z;
+            float ty1 = dist1_path / totalLen * 4.0f;
+            glNormal3f(n1x, n1y, n1z); glTexCoord2f(tx0, ty1); glVertex3f(v1x, v1y, v1z);
+        }
+        glEnd();
+    }
+}
+
+void drawMeteorHammer() {
+    GLUquadric* quad = gluNewQuadric();
+    gluQuadricNormals(quad, GLU_SMOOTH); gluQuadricTexture(quad, GL_TRUE);
+    
+    // Increase scale for better visibility and presence
+    glPushMatrix();
+    glScalef(0.18f, 0.18f, 0.18f);
+
+    // 1. Wooden Handle
+    glBindTexture(GL_TEXTURE_2D, texWeaponWood);
+    glPushMatrix();
+    glTranslatef(0.0f, -0.9f, 0.0f); // Centering handle in hand
+    glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+    gluCylinder(quad, 0.15f, 0.15f, 1.8f, 20, 20); 
+    glPopMatrix();
+
+    // 2. Metal parts
+    glBindTexture(GL_TEXTURE_2D, texWeaponMetal);
+    // Pommel / Top Rim
+    for(int s_idx = 0; s_idx < 2; s_idx++) {
+        int s = (s_idx == 0) ? -1 : 1;
+        glPushMatrix();
+        glTranslatef(0.0f, s == -1 ? -0.9f : 0.9f, 0.0f);
+        glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
+        drawChainLink(quad, 0.05f, 0.16f, 0.0f, 15, 15);
+        glPushMatrix(); glTranslatef(0, 0, -0.02f); gluDisk(quad, 0, 0.17f, 20, 1); glPopMatrix();
+        glPopMatrix();
+    }
+
+    // 3. Chains
+    glBindTexture(GL_TEXTURE_2D, texWeaponChain);
+    for (int i = 0; i < 8; i++) {
+        glPushMatrix();
+        glTranslatef(0.0f, 1.1f + i * 0.32f, 0.0f);
+        if (i % 2 == 0) glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+        glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+        drawChainLink(quad, 0.045f, 0.10f, 0.12f, 15, 15);
+        glPopMatrix();
+    }
+
+    // 4. Meteor Sphere
+    glBindTexture(GL_TEXTURE_2D, texWeaponMetal);
+    glPushMatrix();
+    glTranslatef(0.0f, 4.2f, 0.0f); 
+    gluSphere(quad, 1.2f, 40, 40); 
+    // Spikes (Cones)
+    int numLat = 5; int numLon = 8;
+    for (int lat = 1; lat < numLat; lat++) {
+        float theta = lat * (float)M_PI / numLat;
+        for (int lon = 0; lon < numLon; lon++) {
+            float phi = lon * 2 * (float)M_PI / numLon;
+            float x = sin(theta) * cos(phi); float z = sin(theta) * sin(phi); float y = cos(theta);
+            glPushMatrix();
+            glTranslatef(x * 1.15f, y * 1.15f, z * 1.15f);
+            float angle = acos(z) * 180.0f / (float)M_PI;
+            float len = sqrt(x*x + y*y);
+            if (len > 0.0001f) glRotatef(angle, -y, x, 0.0f);
+            else if (z < 0) glRotatef(180.0f, 1.0f, 0.0f, 0.0f);
+            gluCylinder(quad, 0.12f, 0.0f, 0.55f, 10, 5);
+            glPopMatrix();
+        }
+    }
+    glPopMatrix();
+
+    glPopMatrix();
+    gluDeleteQuadric(quad);
+}
+
+//================================
+// Weapon 2: Fan drawing logic (ported from weapon2.cpp)
+//================================
+
+#ifndef PI
+#define PI 3.14159265358979323846f
+#endif
+
+void drawFanCylinder(float baseRadius, float topRadius, float height, int slices, int stacks) {
+    GLUquadric* q = gluNewQuadric();
+    gluQuadricDrawStyle(q, GLU_FILL);
+    gluQuadricNormals(q, GLU_SMOOTH);
+    gluQuadricTexture(q, GL_TRUE);
+    gluCylinder(q, baseRadius, topRadius, height, slices, stacks);
+    glPushMatrix(); glRotatef(180,1,0,0); gluDisk(q,0,baseRadius,slices,1); glPopMatrix();
+    glPushMatrix(); glTranslatef(0,0,height); gluDisk(q,0,topRadius,slices,1); glPopMatrix();
+    gluDeleteQuadric(q);
+}
+
+void drawFanRib(float length, float width, float thickness) {
+    glPushMatrix();
+    glScalef(width, length, thickness);
+    glTranslatef(0.0f, 0.5f, 0.0f);
+    glBegin(GL_QUADS);
+    glNormal3f( 0,0, 1); glTexCoord2f(0,0); glVertex3f(-0.5f,-0.5f, 0.5f); glTexCoord2f(1,0); glVertex3f( 0.5f,-0.5f, 0.5f); glTexCoord2f(1,1); glVertex3f( 0.5f, 0.5f, 0.5f); glTexCoord2f(0,1); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glNormal3f( 0,0,-1); glTexCoord2f(1,0); glVertex3f(-0.5f,-0.5f,-0.5f); glTexCoord2f(1,1); glVertex3f(-0.5f, 0.5f,-0.5f); glTexCoord2f(0,1); glVertex3f( 0.5f, 0.5f,-0.5f); glTexCoord2f(0,0); glVertex3f( 0.5f,-0.5f,-0.5f);
+    glNormal3f( 0,1, 0); glTexCoord2f(0,1); glVertex3f(-0.5f, 0.5f,-0.5f); glTexCoord2f(0,0); glVertex3f(-0.5f, 0.5f, 0.5f); glTexCoord2f(1,0); glVertex3f( 0.5f, 0.5f, 0.5f); glTexCoord2f(1,1); glVertex3f( 0.5f, 0.5f,-0.5f);
+    glNormal3f( 0,-1,0); glTexCoord2f(1,1); glVertex3f(-0.5f,-0.5f,-0.5f); glTexCoord2f(0,1); glVertex3f( 0.5f,-0.5f,-0.5f); glTexCoord2f(0,0); glVertex3f( 0.5f,-0.5f, 0.5f); glTexCoord2f(1,0); glVertex3f(-0.5f,-0.5f, 0.5f);
+    glNormal3f( 1,0, 0); glTexCoord2f(1,0); glVertex3f( 0.5f,-0.5f,-0.5f); glTexCoord2f(1,1); glVertex3f( 0.5f, 0.5f,-0.5f); glTexCoord2f(0,1); glVertex3f( 0.5f, 0.5f, 0.5f); glTexCoord2f(0,0); glVertex3f( 0.5f,-0.5f, 0.5f);
+    glNormal3f(-1,0, 0); glTexCoord2f(0,0); glVertex3f(-0.5f,-0.5f,-0.5f); glTexCoord2f(1,0); glVertex3f(-0.5f,-0.5f, 0.5f); glTexCoord2f(1,1); glVertex3f(-0.5f, 0.5f, 0.5f); glTexCoord2f(0,1); glVertex3f(-0.5f, 0.5f,-0.5f);
+    glEnd();
+    glPopMatrix();
+}
+
+void drawFanGuard(float length, float thickness, float bL, float bR, float tL, float tR) {
+    glPushMatrix();
+    glBegin(GL_QUADS);
+    glNormal3f(0,0,1);  glTexCoord2f(0,0); glVertex3f(bL,0,thickness/2);  glTexCoord2f(1,0); glVertex3f(bR,0,thickness/2);  glTexCoord2f(1,1); glVertex3f(tR,length,thickness/2);  glTexCoord2f(0,1); glVertex3f(tL,length,thickness/2);
+    glNormal3f(0,0,-1); glTexCoord2f(1,0); glVertex3f(bL,0,-thickness/2); glTexCoord2f(1,1); glVertex3f(tL,length,-thickness/2); glTexCoord2f(0,1); glVertex3f(tR,length,-thickness/2); glTexCoord2f(0,0); glVertex3f(bR,0,-thickness/2);
+    glNormal3f(0,1,0);  glTexCoord2f(0,1); glVertex3f(tL,length,-thickness/2); glTexCoord2f(0,0); glVertex3f(tL,length,thickness/2);  glTexCoord2f(1,0); glVertex3f(tR,length,thickness/2);  glTexCoord2f(1,1); glVertex3f(tR,length,-thickness/2);
+    glNormal3f(0,-1,0); glTexCoord2f(1,1); glVertex3f(bL,0,-thickness/2); glTexCoord2f(0,1); glVertex3f(bR,0,-thickness/2); glTexCoord2f(0,0); glVertex3f(bR,0,thickness/2);  glTexCoord2f(1,0); glVertex3f(bL,0,thickness/2);
+    glNormal3f(1,0,0);  glTexCoord2f(1,0); glVertex3f(bR,0,-thickness/2); glTexCoord2f(1,1); glVertex3f(tR,length,-thickness/2); glTexCoord2f(0,1); glVertex3f(tR,length,thickness/2);  glTexCoord2f(0,0); glVertex3f(bR,0,thickness/2);
+    glNormal3f(-1,0,0); glTexCoord2f(0,0); glVertex3f(bL,0,-thickness/2); glTexCoord2f(1,0); glVertex3f(bL,0,thickness/2);  glTexCoord2f(1,1); glVertex3f(tL,length,thickness/2);  glTexCoord2f(0,1); glVertex3f(tL,length,-thickness/2);
+    glEnd();
+    glPopMatrix();
+}
+
+void drawFanLeaf(int numFolds, float innerRadius, float outerRadius, float startAngle, float endAngle, float stackDepth) {
+    float spreadAngle  = endAngle - startAngle;
+    float closedFactor = 1.0f - (spreadAngle / 140.0f);
+    int segPerGap = 10, total = numFolds * segPerGap;
+    float step = (endAngle - startAngle) / total;
+    glBegin(GL_TRIANGLE_STRIP);
+    for (int i = 0; i <= total; i++) {
+        float angle = startAngle + i * step;
+        float rad = angle * PI / 180.0f;
+        float t = (float)i / total;
+        float baseZ = (stackDepth/2.0f) - stackDepth * t;
+        int gIdx = (i == total) ? numFolds-1 : i / segPerGap;
+        float lPos = (i == total) ? 1.0f : (float)(i % segPerGap) / segPerGap;
+        float sign = (gIdx % 2 == 0) ? -1.0f : 1.0f;
+        float tri = 1.0f - fabs(lPos * 2.0f - 1.0f);
+        float fd = 0.14f * tri * closedFactor;
+        float tx = -sin(rad), ty = cos(rad);
+        float xI = innerRadius*cos(rad) + tx*fd*sign*(innerRadius/outerRadius);
+        float yI = innerRadius*sin(rad) + ty*fd*sign*(innerRadius/outerRadius);
+        float xO = outerRadius*cos(rad) + tx*fd*sign;
+        float yO = outerRadius*sin(rad) + ty*fd*sign;
+        float ozf = 0.2f*tri*sign*(1.0f-closedFactor);
+        float zO = baseZ + ozf, zI = baseZ + ozf*(innerRadius/outerRadius);
+        float px=tx,py=ty,pz=sign*0.5f,pl=sqrt(px*px+py*py+pz*pz);
+        glNormal3f(px/pl,py/pl,pz/pl);
+        float sh = 0.8f + tri*sign*0.15f; 
+        glColor3f(sh, sh, sh); 
+        float uI = ((innerRadius*cos(rad)/outerRadius)*0.5f+0.5f)*(1-closedFactor)+t*closedFactor;
+        float vI = (innerRadius*sin(rad)/outerRadius)*(1-closedFactor)+(innerRadius/outerRadius)*closedFactor;
+        float uO = ((outerRadius*cos(rad)/outerRadius)*0.5f+0.5f)*(1-closedFactor)+t*closedFactor;
+        float vO = (outerRadius*sin(rad)/outerRadius)*(1-closedFactor)+1.0f*closedFactor;
+        glTexCoord2f(uI,vI); glVertex3f(xI,yI,zI);
+        glTexCoord2f(uO,vO); glVertex3f(xO,yO,zO);
+    }
+    glEnd();
+}
+
+void drawFan(float spreadAngle) {
+    float ribCount = 21;
+    float minAngle = 90.0f - (spreadAngle / 2.0f);
+    float maxAngle = 90.0f + (spreadAngle / 2.0f);
+    GLfloat white[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    float stackDepth = 0.35f;
+
+    glPushMatrix();
+    // Scale down to fit character hand
+    glScalef(0.12f, 0.12f, 0.12f);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texFanWood);
+
+    // Pivot pin
+    glPushMatrix();
+    glColor3fv(white);
+    glTranslatef(0,0,-(stackDepth/2.0f+0.04f));
+    drawFanCylinder(0.12f,0.12f,stackDepth+0.08f,30,5);
+    glPopMatrix();
+
+    // Inner ribs
+    float ribLen=2.05f, ribW=0.08f, ribThk=0.015f;
+    float angleStep = spreadAngle / (ribCount-1);
+    for (int i=1;i<(int)ribCount-1;i++) {
+        float ang = minAngle + i*angleStep;
+        glPushMatrix();
+        glRotatef(ang-90.0f,0,0,1);
+        glColor3fv(white);
+        float zOff = (stackDepth/2.0f) - (stackDepth*i/(ribCount-1));
+        glTranslatef(0,0,zOff);
+        drawFanRib(ribLen,ribW,ribThk);
+        glPopMatrix();
+    }
+
+    // Outer guards
+    float gLen=5.05f,gBW=0.4f,gTW=0.35f,gThk=0.04f;
+    glPushMatrix(); glRotatef(minAngle-90.0f,0,0,1); glTranslatef(0,0,stackDepth/2.0f+gThk/2.0f); glColor3fv(white); drawFanGuard(gLen,gThk,-gBW/2,gBW/2,-gTW/2,gTW/2); glPopMatrix();
+    glPushMatrix(); glRotatef(maxAngle-90.0f,0,0,1); glTranslatef(0,0,-(stackDepth/2.0f+gThk/2.0f)); glColor3fv(white); drawFanGuard(gLen,gThk,-gBW/2,gBW/2,-gTW/2,gTW/2); glPopMatrix();
+
+    // Fan leaf
+    glBindTexture(GL_TEXTURE_2D, texFan);
+    glColor3fv(white);
+    drawFanLeaf((int)ribCount-1, 2.0f, 5.0f, minAngle, maxAngle, stackDepth);
+
+    glPopMatrix();
 }
 
 //================================
@@ -198,6 +468,16 @@ void updateAnimation()
         if (fabs(rightLegAngle) < 0.1f) rightLegAngle = 0;
         if (fabs(walkArmSwing) < 0.1f)  walkArmSwing = 0;
     }
+
+    // Fan spread animation
+    float fanSpeed = 180.0f; // degrees per second
+    if (fanSpreadAngle < fanTargetAngle) {
+        fanSpreadAngle += fanSpeed * dt;
+        if (fanSpreadAngle > fanTargetAngle) fanSpreadAngle = fanTargetAngle;
+    } else if (fanSpreadAngle > fanTargetAngle) {
+        fanSpreadAngle -= fanSpeed * dt;
+        if (fanSpreadAngle < fanTargetAngle) fanSpreadAngle = fanTargetAngle;
+    }
 }
 
 //================================
@@ -238,12 +518,35 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case 'C': rightArmAngle += 5; if (rightArmAngle > 120) rightArmAngle = 120; break;
         case 'V': rightArmAngle -= 5; if (rightArmAngle < 0)   rightArmAngle = 0;   break;
 
+        case VK_F1:
+            if (weapon2_status) weapon2_status = false;
+            weapon1_status = !weapon1_status;
+            leftFistActive = (weapon1_status || weapon2_status);
+            break;
+
+        case VK_F2:
+            if (weapon1_status) weapon1_status = false;
+            weapon2_status = !weapon2_status;
+            leftFistActive = (weapon1_status || weapon2_status);
+            if (weapon2_status) fanTargetAngle = 0.0f; 
+            break;
+
+        case '5':
+            // Toggle fan open/close if it is equipped
+            if (weapon2_status) {
+                fanTargetAngle = (fanTargetAngle > 70.0f) ? 0.0f : 140.0f;
+            }
+            break;
+
         // Attack animation
         case 'F': attackAnimation = true; attackAngle = 0; break;
 
         // Fist toggle  (1 = right, 2 = left)
-        case '1': rightFistActive = !rightFistActive; break;
-        case '2': leftFistActive  = !leftFistActive;  break;
+        case '2': rightFistActive = !rightFistActive; break;
+        case '1': 
+            if (weapon1_status || weapon2_status) break;
+            leftFistActive  = !leftFistActive;  
+            break;
         }
         break;
 
@@ -638,7 +941,7 @@ void drawProceduralArmPart(float length,
     }
 }
 
-void drawProceduralArmBase(bool isLeft, float fistProgress)
+void drawProceduralArmBase(bool isLeft, float fistProgress, int part)
 {
     GLUquadric* quad = gluNewQuadric();
     gluQuadricTexture(quad, GL_TRUE);
@@ -649,14 +952,40 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
 
     glPushMatrix();
 
-    // Rounded Shoulder (Increased volume to fill the torso gap)
+    // Small Shoulder Assembly (2 cylinders + 1 sphere)
     glPushMatrix();
     glBindTexture(GL_TEXTURE_2D, texSkin);
-    // Shift significantly to bridge the gap between arm at 1.20 and torso at 1.35
-    glTranslatef(isLeft ? 0.08f : -0.08f, 0.01f, -0.08f); 
-    glScalef(2.0f, 1.6f, 2.2f); // Much larger volume for a more cohesive shoulder
-    gluSphere(quad, 0.11f, 32, 32);
+    // Position the assembly at the arm rotation center (origin)
+    glTranslatef(0.0f, 0.0f, 0.0f); 
+    
+    if (part == 0) {
+        // 2. Torso Connector Cylinder (Static part)
+        glPushMatrix();
+        glRotatef(isLeft ? 90.0f : -90.0f, 0.0f, 1.0f, 0.0f);
+        gluCylinder(quad, 0.12f, 0.12f, 0.22f, 32, 2);
+        glPopMatrix();
+    } else {
+        // 1. Central Ball Joint (Rotating part)
+        gluSphere(quad, 0.12f, 32, 32);
+
+        // 3. Arm Connector Cylinder (Rotating part)
+        glPushMatrix();
+        gluCylinder(quad, 0.12f, 0.12f, 0.22f, 32, 2);
+        glPopMatrix();
+    }
+
     glPopMatrix();
+
+    if (part == 0) {
+        glPopMatrix();
+        gluDeleteQuadric(quad);
+        return;
+    }
+
+    // Shift the arm mesh down to make the shoulder connector cylinder visible
+    glTranslatef(0.0f, 0.0f, 0.18f); 
+    // Apply outward tilt to the WHOLE arm (from joint down)
+    glRotatef(isLeft?-10.0f:10.0f, 0, 1, 0);
 
     // ---- Upper arm clothing ----
     glDisable(GL_TEXTURE_2D);
@@ -666,7 +995,6 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
     glEnable(GL_TEXTURE_2D);
     glColor3f(1,1,1);
     glPushMatrix();
-    glRotatef(isLeft?5.0f:-5.0f, 0,1,0); 
     drawProceduralArmPart(0.53f,0.13f,0.13f,0.10f,0.10f,40,20,0.015f,0.5f);
     glPopMatrix();
 
@@ -697,18 +1025,17 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
     glEnd();
     glPopMatrix();
 
-    // 3. Gold bicep band
-    glPushMatrix();
-    glTranslatef(0,0,0.105f);
-    glRotatef(isLeft?5.0f:-5.0f, 0,1,0);
-    glTranslatef(isLeft?0.01f:-0.01f,0,0);
+    // 3. Two Gold bicep bands
     glBindTexture(GL_TEXTURE_2D, texGold); glColor3f(1,1,1);
-    gluCylinder(quad,0.135f,0.13f,0.045f,30,1);
-    glPopMatrix();
+    for(int i=0; i<2; i++) {
+        glPushMatrix();
+        glTranslatef(0, 0, 0.08f + i*0.06f);
+        gluCylinder(quad, 0.136f, 0.136f, 0.035f, 30, 1);
+        glPopMatrix();
+    }
 
     // 4. White flared sleeve
     glPushMatrix();
-    glRotatef(isLeft?5.0f:-5.0f,0,1,0);
     glTranslatef(0,0,0.35f);
 
     glDisable(GL_TEXTURE_2D);
@@ -717,7 +1044,7 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
     gluQuadricNormals(qBand,GLU_SMOOTH);
 
     glPushMatrix();
-    float bRTop=0.115f, bThickTop=0.028f;
+    float bRTop=0.120f, bThickTop=0.028f; // Increased radius to prevent clipping
     gluDisk(qBand,0.08f,bRTop,30,1);
     gluCylinder(qBand,bRTop,bRTop,bThickTop,30,1);
     glTranslatef(0,0,bThickTop); gluDisk(qBand,0.08f,bRTop,30,1);
@@ -725,7 +1052,7 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
 
     glPushMatrix();
     glTranslatef(0,0,0.16f);
-    float bRBot=0.122f, bThickBot=0.012f;
+    float bRBot=0.127f, bThickBot=0.012f; // Increased radius to prevent clipping
     gluDisk(qBand,0.08f,bRBot,30,1);
     gluCylinder(qBand,bRBot,bRBot,bThickBot,30,1);
     glTranslatef(0,0,bThickBot); gluDisk(qBand,0.08f,bRBot,30,1);
@@ -744,7 +1071,6 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
     glColor3f(1,1,1);
 
     // Upper arm skin
-    glRotatef(isLeft?5.0f:-5.0f,0,1,0); 
     drawProceduralArmPart(0.53f,0.125f,0.125f,0.095f,0.095f,40,40,0.015f,0.5f);
 
     // Elbow joint
@@ -769,7 +1095,7 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
     GLUquadric* qR=gluNewQuadric(); gluQuadricTexture(qR,GL_TRUE);
     for(int r=0;r<3;r++){
         glPushMatrix(); glTranslatef(0,0,r*0.015f);
-        glScalef(1.0f,0.82f,1.0f); gluCylinder(qR,0.053f,0.053f,0.010f,30,1);
+        glScalef(1.0f,0.85f,1.0f); gluCylinder(qR,0.075f,0.075f,0.010f,30,1);
         glPopMatrix();
     }
     gluDeleteQuadric(qR);
@@ -779,6 +1105,12 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
     // Wrist joint
     glTranslatef(0,0,0.53f);
     glRotatef(isLeft?90.0f:-90.0f,0,0,1);
+
+    // Dynamic wrist tilt when opening the fan
+    if (isLeft && weapon2_status) {
+        float tilt = (fanSpreadAngle / 140.0f) * 60.0f;
+        glRotatef(tilt, 0, 0, 1);
+    }
 
     // Hand palm
     float knuckleRx=0.06f, knuckleRy=0.025f, handLength=0.16f;
@@ -821,15 +1153,62 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
         float rx=0.014f,ry=0.012f;
         glPushMatrix(); gluSphere(quad,rx,16,16); glPopMatrix();
         glRotatef(isLeft?fingerAng[i]:-fingerAng[i],0,1,0);
-        glRotatef(12.0f+fistProgress*80.0f,1,0,0);
+
+        // Standard tight fist curling
+        float j1Base = 12.0f;
+        float j1Fist = 80.0f;
+        glRotatef(j1Base + fistProgress*j1Fist, 1,0,0);
         drawProceduralArmPart(fingerLen[i],rx,ry,rx*0.9f,ry*0.9f,16,16,0.003f,0.5f);
         glTranslatef(0,0,fingerLen[i]); gluSphere(quad,rx*0.9f,16,16);
-        glRotatef(25.0f+fistProgress*75.0f,1,0,0);
+
+        float j2Base = 25.0f;
+        float j2Fist = 75.0f;
+        glRotatef(j2Base + fistProgress*j2Fist, 1,0,0);
         drawProceduralArmPart(fingerLen[i]*0.7f,rx*0.9f,ry*0.9f,rx*0.75f,ry*0.75f,16,16,0.002f,0.5f);
         glTranslatef(0,0,fingerLen[i]*0.7f); gluSphere(quad,rx*0.75f,16,16);
-        glRotatef(20.0f+fistProgress*70.0f,1,0,0);
+
+        float j3Base = 20.0f;
+        float j3Fist = 70.0f;
+        glRotatef(j3Base + fistProgress*j3Fist, 1,0,0);
         drawProceduralArmPart(fingerLen[i]*0.5f,rx*0.75f,ry*0.75f,rx*0.6f,ry*0.6f,16,16,0.001f,0.5f);
         glTranslatef(0,0,fingerLen[i]*0.5f); gluSphere(quad,rx*0.6f,16,16);
+        glPopMatrix();
+    }
+
+    // ---- Weapon 1: Meteor Hammer ----
+    // Held on LEFT arm (appears on screen RIGHT when character faces camera)
+    if (isLeft && weapon1_status) {
+        glPushMatrix();
+
+        // NOTE: We are currently at the KNUCKLE origin (after glTranslatef(0,0,handLength)).
+        // To reach MID-PALM (wrist z=0.08), we go BACK by -0.08 in wrist Z
+        // (-0.08 from knuckle = wrist + 0.08 = mid palm position, inside the fist)
+        // Y = -0.04 shifts handle toward palm face where fingers curl (grip sweet spot)
+        glTranslatef(0.0f, -0.032f, -0.032f);
+
+        // Rotate -90deg around wrist Z so weapon +Y -> wrist +X -> world forward (+Z)
+        // For left arm: wrist +X = world forward => ball faces forward toward camera
+        glRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
+
+        drawMeteorHammer();
+        glPopMatrix();
+    }
+
+    // ---- Weapon 2: Fan (starts folded) ----
+    // Held on LEFT arm (appears on screen RIGHT when character faces camera)
+    if (isLeft && weapon2_status) {
+        glPushMatrix();
+        // Counter-rotate the weapon so it doesn't follow the hand tilt
+        float tilt = (fanSpreadAngle / 140.0f) * 60.0f;
+        glRotatef(-tilt, 0, 0, 1);
+
+        // Translating to palm SWEET SPOT, just like Weapon 1
+        glTranslatef(0.0f, -0.032f, -0.032f);
+        
+        // Rotate -90deg around Z so Fan points forward like Meteor Hammer
+        glRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
+        
+        drawFan(fanSpreadAngle);
         glPopMatrix();
     }
 
@@ -843,20 +1222,36 @@ void drawProceduralArmBase(bool isLeft, float fistProgress)
 void drawLeftArm()
 {
     glPushMatrix();
-    glTranslatef(-0.58f, 1.20f, 0.0f); // Lowered arm joint
-    glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0); // Negative to flip direction forward
+    glTranslatef(-0.58f, 1.24f, 0.04f); // Set origin to ball joint center
+    
+    // 1. Draw Static shoulder part (connector) — not affected by arm rotation
+    glPushMatrix();
+    glRotatef(90, 1, 0, 0); 
+    drawProceduralArmBase(true, leftFistProgress, 0); // part 0 = static
+    glPopMatrix();
+
+    // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
+    glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0); 
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(true, leftFistProgress);
+    drawProceduralArmBase(true, leftFistProgress, 1); // part 1 = rotating
     glPopMatrix();
 }
 
 void drawRightArm()
 {
     glPushMatrix();
-    glTranslatef(0.58f, 1.20f, 0.0f); // Lowered arm joint
-    glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0); // Negative to flip direction forward
+    glTranslatef(0.58f, 1.24f, 0.04f); // Set origin to ball joint center
+
+    // 1. Draw Static shoulder part (connector) — not affected by arm rotation
+    glPushMatrix();
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, rightFistProgress);
+    drawProceduralArmBase(false, rightFistProgress, 0); // part 0 = static
+    glPopMatrix();
+
+    // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
+    glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0);
+    glRotatef(90, 1, 0, 0);
+    drawProceduralArmBase(false, rightFistProgress, 1); // part 1 = rotating
     glPopMatrix();
 }
 
@@ -1434,6 +1829,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
     texWhiteSleeve  = loadBMP("white_sleeve.bmp");
     texWhiteLeather = loadBMP("white_leather.bmp");
     texDarkLeather  = loadBMP("dark_leather.bmp");
+    texWeaponMetal  = loadBMP("metal.bmp");
+    texWeaponWood   = loadBMP("wood.bmp");
+    texWeaponChain  = loadBMP("chain.bmp");
+    texFanWood      = loadBMP("fan_wood.bmp");
+    texFan          = loadBMP("fan.bmp");
 
     ShowWindow(hWnd, nCmdShow);
 
