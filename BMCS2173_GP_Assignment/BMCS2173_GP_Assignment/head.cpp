@@ -24,6 +24,8 @@ float cameraX, cameraY, cameraZ;
 //--------------------------------
 
 GLuint texSkin;
+GLuint texGold;
+
 
 GLuint loadBMP(const char* filename) {
 	FILE* file = fopen(filename, "rb");
@@ -424,27 +426,58 @@ void drawBunnyEars() {
 }
 
 void drawHairOrnaments() {
-    // Huge thick gold arcs over the forehead
-    glColor3f(0.85f, 0.7f, 0.15f);
+    // Center Blue Gem Base Structure (Gold)
+    glPushMatrix();
+    float px, py, pz;
+    getHeadVertex(0.82f, 1.5708f, px, py, pz); // Forehead center
+    glTranslatef(px, py + 0.02f, pz);
     
+    // Slight tilt to match skull curvature
+    glRotatef(-15.0f, 1, 0, 0); 
+    
+    if (texGold) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texGold);
+        glColor3f(1.0f, 1.0f, 1.0f);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.85f, 0.70f, 0.15f);
+    }
+
+    glBegin(GL_POLYGON);
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glTexCoord2f(0.5f, 1.0f); glVertex3f( 0.0f,   0.02f,  0.08f);
+    glTexCoord2f(0.0f, 0.5f); glVertex3f(-0.06f,  0.0f,   0.0f);
+    glTexCoord2f(0.5f, 0.0f); glVertex3f( 0.0f,  -0.02f, -0.06f);
+    glTexCoord2f(1.0f, 0.5f); glVertex3f( 0.06f,  0.0f,   0.0f);
+    glEnd();
+
+    // Center Vivid Blue Gem
+    glDisable(GL_TEXTURE_2D);
+    glColor3f(0.0f, 0.7f, 1.0f);
+    glBegin(GL_POLYGON);
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glVertex3f( 0.0f,   0.025f, 0.06f);
+    glVertex3f(-0.04f,  0.01f,  0.0f);
+    glVertex3f( 0.0f,  -0.01f, -0.04f);
+    glVertex3f( 0.04f,  0.01f,  0.0f);
+    glEnd();
+    
+    // Draw intricate side sweeping golden wings of the tiara
     for(int side = -1; side <= 1; side += 2) {
         glPushMatrix();
-        float px, py, pz;
-        getHeadVertex(0.80f, 3.14159f*0.5f + side*0.3f, px, py, pz);
-        glTranslatef(px, py + 0.05f, pz + 0.05f);
+        glColor3f(0.85f, 0.70f, 0.15f);
         
-        glRotatef(side * 30.0f, 0, 1, 0);
-        glRotatef(30.0f, 1, 0, 0);
-        
-        // Draw elegant curve horn
-        int pieces = 10;
+        int pieces = 12;
         glBegin(GL_QUAD_STRIP);
         for(int i=0; i<=pieces; i++) {
             float t = (float)i/pieces;
-            float rad = 0.03f * (1.0f - t);
-            float hX = side * t * 0.15f;
-            float hY = -t * t * 0.1f;
-            float hZ = t * 0.1f;
+            float rad = 0.012f * (1.0f - t);
+            
+            // Sweep outwards, up, and backwards
+            float hX = side * (0.05f + t * 0.18f); // out
+            float hY = -t * 0.15f; // slowly pull it backwards along the head
+            float hZ = t * 0.12f - t*t*0.06f; // up then curve
             
             for(int j=0; j<=6; j++) {
                 float th = (float)j/6 * 2.0f * 3.14159f;
@@ -455,16 +488,48 @@ void drawHairOrnaments() {
         }
         glEnd();
         
-        // Embedded blue gem
-        glColor3f(0.0f, 0.8f, 1.0f); // Cyan
-        glTranslatef(0.0f, 0.0f, -0.02f);
-        glScalef(1.0f, 0.3f, 1.5f);
-        GLUquadric* quad = gluNewQuadric();
-        gluSphere(quad, 0.05, 16, 16);
-        gluDeleteQuadric(quad);
-        glColor3f(0.85f, 0.7f, 0.15f);
+        // Lower golden wing 
+        glBegin(GL_QUAD_STRIP);
+        for(int i=0; i<=pieces; i++) {
+            float t = (float)i/pieces;
+            float rad = 0.008f * (1.0f - t);
+            
+            float hX = side * (0.06f + t * 0.15f);
+            float hY = -t * 0.12f;
+            float hZ = -t * 0.05f - t*t*0.02f;
+            
+            for(int j=0; j<=6; j++) {
+                float th = (float)j/6 * 2.0f * 3.14159f;
+                float nx = cos(th), ny = sin(th);
+                glNormal3f(nx, ny, 0.0f);
+                glVertex3f(hX + nx*rad, hY + ny*rad, hZ);
+            }
+        }
+        glEnd();
+        
+        // Add blue accent loops embedded in the gold
+        glColor3f(0.0f, 0.5f, 1.0f);
+        glBegin(GL_QUAD_STRIP);
+        for(int i=0; i<=10; i++) {
+            float t = (float)i/10;
+            float rad = 0.015f * (1.0f - t*0.5f);
+            float angle = t * 3.14159f;
+            
+            float hX = side * (0.10f + sin(angle) * 0.05f);
+            float hY = -0.05f - t*0.05f;
+            float hZ = 0.02f - cos(angle) * 0.06f;
+            
+            for(int j=0; j<=4; j++) {
+                float th = (float)j/4 * 2.0f * 3.14159f;
+                float nx = cos(th), ny = sin(th);
+                glNormal3f(nx, ny, 0.0f);
+                glVertex3f(hX + nx*rad, hY + ny*rad, hZ);
+            }
+        }
+        glEnd();
         glPopMatrix();
     }
+    glPopMatrix();
 }
 
 void crossProduct3(const float a[3], const float b[3], float out[3]) {
@@ -567,89 +632,325 @@ void drawTubularHairStrand(float p0[3], float p1[3], float p2[3], float p3[3], f
     }
 }
 
+void drawFaceFeatures() {
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    float zEye = 0.45f;
+    float thetaRight = 1.05f; 
+    float thetaLeft = 2.09f;
+
+    // Sclera (White base)
+    glColor3f(0.98f, 0.98f, 0.98f);
+    for (int side = 0; side < 2; side++) {
+        float thetaCenter = (side == 0) ? thetaRight : thetaLeft;
+        glBegin(GL_POLYGON);
+        glNormal3f(cos(thetaCenter), sin(thetaCenter), 0);
+        for (int i = 0; i <= 20; i++) {
+            float a = (float)i / 20.0f * 6.283f;
+            float th = thetaCenter + 0.18f * cos(a);
+            float z = zEye + 0.09f * sin(a);
+            float px, py, pz; getHeadVertex(z, th, px, py, pz);
+            glVertex3f(px * 1.01f, py * 1.01f, pz);
+        }
+        glEnd();
+    }
+
+    // Iris (Deep Blue)
+    glColor3f(0.1f, 0.2f, 0.7f);
+    for (int side = 0; side < 2; side++) {
+        float thetaCenter = (side == 0) ? thetaRight + 0.03f : thetaLeft - 0.03f;
+        glBegin(GL_POLYGON);
+        glNormal3f(cos(thetaCenter), sin(thetaCenter), 0);
+        for (int i = 0; i <= 20; i++) {
+            float a = (float)i / 20.0f * 6.283f;
+            float th = thetaCenter + 0.09f * cos(a);
+            float z = zEye + 0.07f * sin(a);
+            float px, py, pz; getHeadVertex(z, th, px, py, pz);
+            glVertex3f(px * 1.015f, py * 1.015f, pz);
+        }
+        glEnd();
+        
+        // Pupil (Dark blue/black)
+        glColor3f(0.02f, 0.02f, 0.15f);
+        glBegin(GL_POLYGON);
+        glNormal3f(cos(thetaCenter), sin(thetaCenter), 0);
+        for (int i = 0; i <= 15; i++) {
+            float a = (float)i / 15.0f * 6.283f;
+            float th = thetaCenter + 0.05f * cos(a);
+            float z = zEye + 0.04f * sin(a);
+            float px, py, pz; getHeadVertex(z, th, px, py, pz);
+            glVertex3f(px * 1.02f, py * 1.02f, pz);
+        }
+        glEnd();
+        
+        // Specular highlight (sparkle)
+        glColor3f(1.0f, 1.0f, 1.0f);
+        glBegin(GL_POLYGON);
+        glNormal3f(cos(thetaCenter), sin(thetaCenter), 0);
+        for (int i = 0; i <= 10; i++) {
+            float a = (float)i / 10.0f * 6.283f;
+            float th = thetaCenter - 0.03f + 0.02f * cos(a);
+            float z = zEye + 0.03f + 0.025f * sin(a); 
+            float px, py, pz; getHeadVertex(z, th, px, py, pz);
+            glVertex3f(px * 1.025f, py * 1.025f, pz);
+        }
+        glEnd();
+        glColor3f(0.1f, 0.2f, 0.7f); 
+    }
+
+    // Thick Eyelashes (Black)
+    glColor3f(0.05f, 0.05f, 0.05f);
+    for (int side = 0; side < 2; side++) {
+        float thetaCenter = (side == 0) ? thetaRight : thetaLeft;
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= 10; i++) {
+            float a = (float)i / 10.0f * 3.1415f; // Upper half
+            float th = thetaCenter + 0.18f * cos(a);
+            float zBase = zEye + 0.09f * sin(a);
+            
+            float px1, py1, pz1; getHeadVertex(zBase, th, px1, py1, pz1);
+            float px2, py2, pz2; getHeadVertex(zBase + 0.03f + (0.01f*sin(a)), th, px2, py2, pz2);
+            
+            glNormal3f(px1, py1, 0);
+            glVertex3f(px1 * 1.01f, py1 * 1.01f, pz1);
+            glVertex3f(px2 * 1.02f, py2 * 1.02f, pz2);
+        }
+        glEnd();
+    }
+    
+    // NOSE 
+    glColor3f(0.85f, 0.60f, 0.50f); // Deeper blush for bridge
+    float zNose = 0.32f;
+    float thNose = 1.5708f;
+    glBegin(GL_TRIANGLES);
+    float pxN1, pyN1, pzN1; getHeadVertex(zNose + 0.02f, thNose, pxN1, pyN1, pzN1);
+    float pxN2, pyN2, pzN2; getHeadVertex(zNose - 0.01f, thNose - 0.03f, pxN2, pyN2, pzN2);
+    float pxN3, pyN3, pzN3; getHeadVertex(zNose - 0.01f, thNose + 0.03f, pxN3, pyN3, pzN3);
+    glNormal3f(0, 1, 0);
+    glVertex3f(pxN1 * 1.02f, pyN1 * 1.02f, pzN1);
+    glVertex3f(pxN2 * 1.025f, pyN2 * 1.025f, pzN2);
+    glVertex3f(pxN3 * 1.025f, pyN3 * 1.025f, pzN3);
+    glEnd();
+    
+    // MOUTH (Small smile)
+    glColor3f(0.8f, 0.4f, 0.4f);
+    float zMouth = 0.16f;
+    glBegin(GL_QUAD_STRIP);
+    for(int i = 0; i <= 10; i++) {
+        float f = (float)i / 10.0f;
+        float th = 1.5708f - 0.08f + f * 0.16f;
+        float mouthCurve = sin(f * 3.1415f) * 0.015f;
+        float pxM1, pyM1, pzM1; getHeadVertex(zMouth - mouthCurve, th, pxM1, pyM1, pzM1);
+        float pxM2, pyM2, pzM2; getHeadVertex(zMouth - mouthCurve - 0.008f, th, pxM2, pyM2, pzM2);
+        glNormal3f(pxM1, pyM1, 0);
+        glVertex3f(pxM1 * 1.01f, pyM1 * 1.01f, pzM1);
+        glVertex3f(pxM2 * 1.01f, pyM2 * 1.01f, pzM2);
+    }
+    glEnd();
+    
+    // BLUSH (Soft pink under eyes)
+    glColor4f(1.0f, 0.5f, 0.5f, 0.4f); 
+    for (int side = 0; side < 2; side++) {
+        float thetaCenter = (side == 0) ? (thetaRight + 0.1f) : (thetaLeft - 0.1f);
+        glBegin(GL_POLYGON);
+        glNormal3f(cos(thetaCenter), sin(thetaCenter), 0);
+        for (int i = 0; i <= 15; i++) {
+            float a = (float)i / 15.0f * 6.283f;
+            float th = thetaCenter + 0.12f * cos(a);
+            float z = zEye - 0.08f + 0.05f * sin(a);
+            float px, py, pz; getHeadVertex(z, th, px, py, pz);
+            glVertex3f(px * 1.01f, py * 1.01f, pz);
+        }
+        glEnd();
+    }
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+}
+
+void drawEarrings() {
+    float r = 0.9f, g = 0.8f, b = 0.2f;
+
+    for (int side = -1; side <= 1; side += 2) {
+        float theta = (side == 1) ? 3.14159f : 0.0f; // Ears
+        float zEarLobe = 0.24f;
+        
+        float px, py, pz; getHeadVertex(zEarLobe, theta, px, py, pz);
+        
+        glPushMatrix();
+        glTranslatef(px * 1.05f, py * 1.05f, pz);
+        
+        glDisable(GL_TEXTURE_2D);
+        GLUquadric* quad = gluNewQuadric();
+        
+        // Gold metal ring base
+        glColor3f(r, g, b);
+        glTranslatef(0.0f, 0.0f, -0.04f);
+        gluCylinder(quad, 0.015, 0.015, 0.02, 12, 1);
+        
+        // Cyan gem dangling
+        glTranslatef(0.0f, 0.0f, -0.05f);
+        glColor3f(0.0f, 0.8f, 1.0f);
+        glPushMatrix();
+        glScalef(0.012f, 0.012f, 0.035f);
+        gluSphere(quad, 1.0, 6, 6); // Diamond cut
+        glPopMatrix();
+        
+        gluDeleteQuadric(quad);
+        glPopMatrix();
+    }
+    glEnable(GL_TEXTURE_2D);
+}
+
 void drawDistinctHair()
 {
     glDisable(GL_TEXTURE_2D);
 
-    // --- BASE SCALP ---
-    glColor3f(0.12f, 0.20f, 0.75f);
+    // --- BASE SCALP --- 
+    glColor3f(0.05f, 0.10f, 0.40f); 
     GLUquadric* quad = gluNewQuadric();
     glPushMatrix();
-    glTranslatef(0.0f, 0.02f, 0.90f);
-    glScalef(0.24f, 0.27f, 0.15f);
+    glTranslatef(0.0f, 0.02f, 0.85f);
+    glScalef(0.19f, 0.22f, 0.18f); // Scaled down so hair roots cover it easily
+    gluSphere(quad, 1.0, 32, 16);
+    
+    // Deeper back base
+    glTranslatef(0.0f, -0.2f, -0.6f);
+    glScalef(1.0f, 1.2f, 1.2f);
     gluSphere(quad, 1.0, 32, 16);
     glPopMatrix();
     gluDeleteQuadric(quad);
     
-    // Smooth root and tip gradient colors
-    float rt = 0.10f, gt = 0.15f, bt = 0.75f;
-    float rb = 0.45f, gb = 0.55f, bb = 0.95f;
+    // Vivid gradient
+    float rt = 0.02f, gt = 0.08f, bt = 0.45f;
+    float rb = 0.35f, gb = 0.55f, bb = 1.00f;
     
-    // LAYER 1: 50 Back Hair Tubular Strands (spreading outwards)
-    for (int i = 0; i < 50; i++) {
-        float f = (float)i / 49.0f;
-        float theta = 0.2f - f * 3.54f; // Scatter from left shoulder to right shoulder
+    // LAYER 0: CROWN COVERAGE (Perfectly follows the scalp dome)
+    // Sweeps from the very top tip downwards gracefully across the scalp curve
+    for(int i = 0; i < 110; i++) {
+        float theta = (i / 110.0f) * 6.283f;
         
-        float px, py, pz;
-        getHeadVertex(0.95f, theta, px, py, pz);
+        // We use spherical coordinates starting from near the north pole to the equator
+        float phi0 = 1.45f; // Almost dead center
+        float phi1 = 1.00f;
+        float phi2 = 0.50f;
+        float phi3 = 0.05f; // Equator
         
-        float randCurveX = sin(i * 14.3f) * 0.25f;
-        float randCurveY = cos(i * 9.7f) * 0.25f;
-        float randLength = sin(i * 22.1f) * 0.3f;
-        float randWidth  = fabs(sin(i * 5.5f)) * 0.03f;
+        // Radii slightly larger than the Base Scalp so it sits perfectly above it
+        float rx = 0.21f, ry = 0.24f, rz = 0.20f;
+        float cy = 0.02f, cz = 0.85f;
         
-        float length = 1.7f + randLength;
-        float p0[3] = {px, py, pz};
-        
-        // Ploy outwards from the scalp significantly to create spreading volume 
         float pullX = cos(theta);
         float pullY = sin(theta);
-        float p1[3] = {px + pullX * 0.6f, py + pullY * 0.6f, pz - 0.2f};
         
+        float p0[3] = { rx * cos(phi0) * pullX, cy + ry * cos(phi0) * pullY, cz + rz * sin(phi0) };
+        float p1[3] = { rx * cos(phi1) * pullX, cy + ry * cos(phi1) * pullY, cz + rz * sin(phi1) + 0.02f };
+        float p2[3] = { rx * cos(phi2) * pullX, cy + ry * cos(phi2) * pullY, cz + rz * sin(phi2) + 0.02f };
+        
+        // Taper abruptly shorter around the front face so it doesn't drape over bangs/face
+        if (theta > 1.0f && theta < 2.1f) {
+            phi3 = 0.4f; // Stop higher at the forehead
+        }
+        
+        float p3[3] = { rx * cos(phi3) * pullX * 1.03f, cy + ry * cos(phi3) * pullY * 1.03f, cz + rz * sin(phi3) };
+        
+        float thickness = 0.035f + fabs(sin(i * 3.14f)) * 0.025f;
+        float tint = fabs(cos(i*7.1f)) * 0.1f;
+        drawTubularHairStrand(p0, p1, p2, p3, thickness, 0.005f, 
+                              rt+tint, gt+tint, bt+tint, rb+tint, gb+tint, bb+tint);
+    }
+    
+    // LAYER 1: BACK HAIR LOCKS
+    // Cascades tightly and vertically from the back of the head
+    for (int i = 0; i < 80; i++) {
+        float f = (float)i / 79.0f;
+        float theta = 3.14159f + f * 3.14159f; // PI to 2PI (Back of head)
+        
+        float px, py, pz;
+        float spawnZ = 0.70f + fabs(sin(i * 12.9898f)) * 0.20f; 
+        getHeadVertex(spawnZ, theta, px, py, pz);
+        
+        float p0[3] = {px, py, pz};
+        float pullX = cos(theta);
+        float pullY = sin(theta);
+        
+        // Very tight down to the head trajectory
+        float p1[3] = {px + pullX * 0.05f, py + pullY * 0.05f, pz - 0.2f};
+        
+        float length = 1.8f + fabs(cos(i * 43.1f)) * 1.2f; 
         float endZ = pz - length;
-        float endX = px + pullX * 0.8f + randCurveX;
-        float endY = py + pullY * 0.8f + randCurveY;
         
-        // Midway point adds the s-curve
-        float p2[3] = {endX * 0.6f - randCurveX * 0.5f, endY * 0.6f - randCurveY * 0.5f, endZ + 0.5f};
-        float p3[3] = {endX, endY, endZ};
+        float swayX = sin(i * 17.11f) * 0.1f;
+        float endX = px + pullX * 0.1f + swayX;
+        float endY = py + pullY * 0.1f; 
         
-        float radStart = 0.04f + randWidth;
-        float radEnd = 0.005f; 
+        float curlSwayX = sin(i * 25.44f) * 0.2f;
+
+        float p2[3] = {endX + curlSwayX, endY, endZ + 0.6f};
+        float p3[3] = {endX + curlSwayX * 1.5f, endY - 0.05f, endZ + fabs(sin(i * 60.1f))*0.2f};
         
-        drawTubularHairStrand(p0, p1, p2, p3, radStart, radEnd, rt, gt, bt, rb, gb, bb);
+        float thickness = 0.035f + fabs(sin(i * 9.1f)) * 0.04f; 
+        float tint = fabs(cos(i * 11.1f)) * 0.15f;
+        drawTubularHairStrand(p0, p1, p2, p3, thickness, 0.005f, 
+                              rt+tint, gt+tint, bt+tint, rb+tint, gb+tint, bb+tint);
     }
     
-    // LAYER 2: Separate Bangs / Locks Framing the Face
+    // LAYER 2: SIDE LOCKS (Face framing)
+    // Fixes the face-covering bug by staying strictly on the side profile axes (Y constraint).
     for(int side = -1; side <= 1; side += 2) {
-        float theta = 3.14159f*0.5f + side * 0.65f;
-        float px, py, pz;
-        getHeadVertex(0.85f, theta, px, py, pz);
-        
-        float p0[3] = {px, py, pz};
-        float p1[3] = {px + side*0.3f, py + 0.15f, pz - 0.1f};
-        float p2[3] = {px + side*0.35f, py + 0.05f, pz - 0.6f};
-        float p3[3] = {px + side*0.15f, py - 0.10f, pz - 0.8f}; // Sweeping curl towards shoulder
-        
-        drawTubularHairStrand(p0, p1, p2, p3, 0.06f, 0.005f, rt, gt, bt, rb, gb, bb);
+        for(int l = 0; l < 10; l++) {
+            float f = l / 9.0f;
+            // 1.57 is perfect center face. Left side (2.1 to 3.0), Right side (0.1 to 1.0)
+            float theta = (side == 1) ? (2.1f + f * 0.9f) : (0.1f + f * 0.9f);
+            
+            float pzBase = 0.85f - f * 0.4f; 
+            
+            float px, py, pz;
+            getHeadVertex(pzBase, theta, px, py, pz);
+            
+            float p0[3] = {px, py, pz};
+            
+            // Hang downwards gracefully hugging the cheekbone slightly
+            float p1[3] = {px + cos(theta)*0.1f, py + sin(theta)*0.02f, pz - 0.3f};
+            
+            float endZ = pz - 1.5f - f * 0.8f;
+            float endX = px + side*0.12f; 
+            float endY = py; 
+            
+            float swayY = sin(l*15.0f)*0.05f;
+            float curlX = side * fabs(sin(l*10.0f))*0.15f;
+            float p2[3] = {px + side*0.1f + curlX*0.5f, endY + swayY, pz - 1.0f};
+            float p3[3] = {endX + curlX, endY + swayY, endZ}; 
+            
+            float thickness = 0.035f + fabs(sin(l*7.0f)) * 0.03f;
+            float tint = fabs(cos(l*9.0f)) * 0.15f;
+            drawTubularHairStrand(p0, p1, p2, p3, thickness, 0.003f, 
+                                  rt+tint, gt+tint, bt+tint, rb+tint, gb+tint, bb+tint);
+        }
     }
     
-    // LAYER 3: 7 Distinct Forward Bang Strands
-    for (int i = 0; i < 7; i++) {
-        float f = (float)i / 6.0f;
-        float theta = 3.14159f*0.5f - 0.35f + f * 0.7f;
-        
-        float px, py, pz;
-        getHeadVertex(0.88f, theta, px, py, pz);
-        
-        float p0[3] = {px, py, pz};
-        float p1[3] = {px + cos(theta)*0.15f, py + sin(theta)*0.15f, pz - 0.05f};
-        
-        float curlX = sin(f*15.0f) * 0.05f;
-        float p2[3] = {px + cos(theta)*0.20f, py + sin(theta)*0.20f, pz - 0.20f};
-        float p3[3] = {px + cos(theta)*0.10f + curlX, py + sin(theta)*0.10f, pz - 0.38f + fabs(curlX)*0.5f}; 
-        
-        drawTubularHairStrand(p0, p1, p2, p3, 0.035f, 0.002f, rt, gt, bt, rb, gb, bb);
+    // LAYER 3 REMOVED FOR FACE FOCUS
+    // LAYER 4: TWO HUGE MAJESTIC LOCKS HANGING DEEP IN THE BACK
+    for (int side = -1; side <= 1; side += 2) {
+        for(int l=0; l<4; l++) {
+            float theta = 3.14159f + side * (0.2f + l*0.2f);
+            float spawnZ = 0.80f;
+            float px, py, pz; getHeadVertex(spawnZ, theta, px, py, pz);
+            
+            float p0[3] = {px, py, pz};
+            float p1[3] = {px + cos(theta)*0.1f, py + sin(theta)*0.1f, pz - 0.2f};
+            
+            float endZ = pz - 3.2f; 
+            float endX = px + side*(0.6f + l*0.1f); 
+            float endY = py - 0.2f;
+            
+            float p2[3] = {endX*0.8f, py - 0.1f, endZ + 1.2f};
+            float p3[3] = {endX, endY, endZ};
+            
+            drawTubularHairStrand(p0, p1, p2, p3, 0.08f, 0.01f, 
+                                  rt, gt, bt, rb, gb, bb); 
+        }
     }
     
     drawBunnyEars();
@@ -680,6 +981,8 @@ void display()
         headCachedList = glGenLists(1);
         glNewList(headCachedList, GL_COMPILE);
         drawHeadMesh();
+        drawFaceFeatures();
+        drawEarrings();
         drawDistinctHair(); 
         glEndList();
     }
@@ -714,6 +1017,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
 	setupLighting();
 	
 	texSkin = loadBMP("skin.bmp");
+	texGold = loadBMP("gold.bmp");
 
 	ShowWindow(hWnd, nCmdShow);
 
