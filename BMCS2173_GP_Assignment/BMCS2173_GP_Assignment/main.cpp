@@ -28,18 +28,18 @@ float cameraX, cameraY, cameraZ;
 // Character joint / animation variables
 //================================
 
-float rightArmAngle  = 0.0f;
-float leftArmAngle = 0.0f;
-float rightLegAngle  = 0.0f;
-float leftLegAngle = 0.0f;
+float leftArmAngle  = 0.0f;
+float rightArmAngle = 0.0f;
+float leftLegAngle  = 0.0f;
+float rightLegAngle = 0.0f;
 
 bool  attackAnimation = false;
 float attackAngle     = 0.0f;
 
-bool  rightFistActive   = false;
-bool  leftFistActive  = false;
-float rightFistProgress  = 0.0f;
-float leftFistProgress = 0.0f;
+bool  leftFistActive   = false;
+bool  rightFistActive  = false;
+float leftFistProgress  = 0.0f;
+float rightFistProgress = 0.0f;
 
 // Movement and key state
 float charX = 0.0f;
@@ -61,8 +61,8 @@ float kAnimDistance    = 0.0f;
 float kAnimSpin        = 0.0f;
 bool  preK_weapon1_status = false;
 bool  preK_weapon2_status = false;
-bool  preK_rightFistActive = false;
-float preK_rightFistProgress = 0.0f;
+bool  preK_leftFistActive = false;
+float preK_leftFistProgress = 0.0f;
 float preK_fanTargetAngle = 0.0f;
 
 DWORD lastTime = 0;
@@ -153,12 +153,12 @@ void resetAll()
     cameraDistance = 8.0f;
     cameraX = 0.0f; cameraY = 2.0f; cameraZ = 8.0f;
 
-    rightArmAngle  = 0.0f; leftArmAngle = 0.0f;
-    rightLegAngle  = 0.0f; leftLegAngle = 0.0f;
+    leftArmAngle  = 0.0f; rightArmAngle = 0.0f;
+    leftLegAngle  = 0.0f; rightLegAngle = 0.0f;
 
     attackAnimation = false; attackAngle = 0.0f;
-    rightFistActive  = false; leftFistActive = false;
-    rightFistProgress = 0.0f; leftFistProgress = 0.0f;
+    leftFistActive  = false; rightFistActive = false;
+    leftFistProgress = 0.0f; rightFistProgress = 0.0f;
 
     charX = 0.0f; charZ = 0.0f; charRotation = 0.0f;
     walkPhase = 0.0f; walkArmSwing = 0.0f;
@@ -166,8 +166,8 @@ void resetAll()
 
     weapon1_status = false;
     weapon2_status = false;
-    rightFistActive = false;
     leftFistActive = false;
+    rightFistActive = false;
     fanTargetAngle = 0.0f;
 
     kAnimationActive = false;
@@ -434,22 +434,22 @@ void updateAnimation()
     lastTime = currentTime;
 
     float speed = 0.5f;
-    if (leftFistActive) leftFistProgress += speed * dt;
-    else                 leftFistProgress -= speed * dt;
-    if (leftFistProgress > 1.0f) leftFistProgress = 1.0f;
-    if (leftFistProgress < 0.0f) leftFistProgress = 0.0f;
-
     if (rightFistActive) rightFistProgress += speed * dt;
-    else                rightFistProgress -= speed * dt;
+    else                 rightFistProgress -= speed * dt;
     if (rightFistProgress > 1.0f) rightFistProgress = 1.0f;
     if (rightFistProgress < 0.0f) rightFistProgress = 0.0f;
 
+    if (leftFistActive) leftFistProgress += speed * dt;
+    else                leftFistProgress -= speed * dt;
+    if (leftFistProgress > 1.0f) leftFistProgress = 1.0f;
+    if (leftFistProgress < 0.0f) leftFistProgress = 0.0f;
+
     if (attackAnimation) {
         attackAngle += 2.0f;
-        leftArmAngle = attackAngle;
+        rightArmAngle = attackAngle;
         if (attackAngle > 90) {
             attackAnimation = false;
-            leftArmAngle   = 0;
+            rightArmAngle   = 0;
         }
     }
 
@@ -470,18 +470,18 @@ void updateAnimation()
 
     if (moving) {
         walkPhase += dt * 12.0f; // speed of leg oscillation
-        rightLegAngle  = sin(walkPhase) * 35.0f;
-        leftLegAngle = -sin(walkPhase) * 35.0f;
+        leftLegAngle  = sin(walkPhase) * 35.0f;
+        rightLegAngle = -sin(walkPhase) * 35.0f;
         walkArmSwing  = sin(walkPhase) * 10.0f; // subtle arm swing
     } else {
         // Smoothly reset legs and arm swing to neutral
         float resetSpeed = 8.0f;
-        rightLegAngle  -= rightLegAngle * resetSpeed * dt;
-        leftLegAngle -= leftLegAngle * resetSpeed * dt;
+        leftLegAngle  -= leftLegAngle * resetSpeed * dt;
+        rightLegAngle -= rightLegAngle * resetSpeed * dt;
         walkArmSwing  -= walkArmSwing * resetSpeed * dt;
 
-        if (fabs(rightLegAngle) < 0.1f)  rightLegAngle = 0;
-        if (fabs(leftLegAngle) < 0.1f) leftLegAngle = 0;
+        if (fabs(leftLegAngle) < 0.1f)  leftLegAngle = 0;
+        if (fabs(rightLegAngle) < 0.1f) rightLegAngle = 0;
         if (fabs(walkArmSwing) < 0.1f)  walkArmSwing = 0;
     }
 
@@ -512,8 +512,8 @@ void updateAnimation()
             kAnimDistance = 0.0f;
             weapon1_status = preK_weapon1_status;
             weapon2_status = preK_weapon2_status;
-            rightFistActive = preK_rightFistActive;
-            rightFistProgress = preK_rightFistActive ? 1.0f : 0.0f; // Instant restore
+            leftFistActive = preK_leftFistActive;
+            leftFistProgress = preK_leftFistActive ? 1.0f : 0.0f; // Instant restore
             fanTargetAngle = preK_fanTargetAngle;
         }
         
@@ -555,21 +555,21 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case VK_SUBTRACT: case VK_OEM_MINUS: cameraDistance += 0.3f; break;
 
         // NEW Arm rotation (ZX = left, CV = right)
-        case 'Z': rightArmAngle += 5; if (rightArmAngle > 120) rightArmAngle = 120; break;
-        case 'X': rightArmAngle -= 5; if (rightArmAngle < 0)   rightArmAngle = 0;   break;
-        case 'C': leftArmAngle += 5; if (leftArmAngle > 120) leftArmAngle = 120; break;
-        case 'V': leftArmAngle -= 5; if (leftArmAngle < 0)   leftArmAngle = 0;   break;
+        case 'Z': leftArmAngle += 5; if (leftArmAngle > 120) leftArmAngle = 120; break;
+        case 'X': leftArmAngle -= 5; if (leftArmAngle < 0)   leftArmAngle = 0;   break;
+        case 'C': rightArmAngle += 5; if (rightArmAngle > 120) rightArmAngle = 120; break;
+        case 'V': rightArmAngle -= 5; if (rightArmAngle < 0)   rightArmAngle = 0;   break;
 
         case VK_F1:
             if (weapon2_status) weapon2_status = false;
             weapon1_status = !weapon1_status;
-            rightFistActive = (weapon1_status || weapon2_status);
+            leftFistActive = (weapon1_status || weapon2_status);
             break;
 
         case VK_F2:
             if (weapon1_status) weapon1_status = false;
             weapon2_status = !weapon2_status;
-            rightFistActive = (weapon1_status || weapon2_status);
+            leftFistActive = (weapon1_status || weapon2_status);
             if (weapon2_status) fanTargetAngle = 0.0f; 
             break;
 
@@ -584,11 +584,11 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case 'F': attackAnimation = true; attackAngle = 0; break;
 
         // Fist toggle  (1 = right, 2 = left)
-        case '2': leftFistActive = !leftFistActive; break;
+        case '2': rightFistActive = !rightFistActive; break;
         case '1': 
             if (kAnimationActive) break; // blocked during K animation
             if (weapon1_status || weapon2_status) break;
-            rightFistActive  = !rightFistActive;  
+            leftFistActive  = !leftFistActive;  
             break;
 
         case 'K':
@@ -601,13 +601,13 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 // Store previous states
                 preK_weapon1_status = weapon1_status;
                 preK_weapon2_status = weapon2_status;
-                preK_rightFistActive = rightFistActive;
-                preK_rightFistProgress = rightFistProgress;
+                preK_leftFistActive = leftFistActive;
+                preK_leftFistProgress = leftFistProgress;
                 preK_fanTargetAngle = fanTargetAngle;
                 
                 weapon1_status = false;    // Hide meteor hammer temporarily
-                rightFistActive = false;    // The hands open
-                rightFistProgress = 0.0f;   // Instant open
+                leftFistActive = false;    // The hands open
+                leftFistProgress = 0.0f;   // Instant open
             }
             break;
         }
@@ -825,7 +825,7 @@ void drawRoundTrim(float r)
     glEnd();
 }
 
-void drawLegBase(bool isRight)
+void drawLegBase(bool isLeft)
 {
     GLUquadric* quad = gluNewQuadric();
     gluQuadricNormals(quad, GLU_SMOOTH);
@@ -834,7 +834,7 @@ void drawLegBase(bool isRight)
     glPushMatrix();
     glRotatef(90, 1, 0, 0);  // leg points downward in Y-up space
 
-    if (isRight) {
+    if (!isLeft) {
         // Right leg: short sock (below knee)
         glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
         // Right leg: lower calf
@@ -931,8 +931,8 @@ void drawLeftLeg()
 {
     glPushMatrix();
     glTranslatef(-0.16f, 1.53f, 0.0f);
-    glRotatef(rightLegAngle, 1, 0, 0);
-    drawLegBase(false);
+    glRotatef(leftLegAngle, 1, 0, 0);
+    drawLegBase(true);
     glPopMatrix();
 }
 
@@ -940,8 +940,8 @@ void drawRightLeg()
 {
     glPushMatrix();
     glTranslatef(0.16f, 1.53f, 0.0f);
-    glRotatef(leftLegAngle, 1, 0, 0);
-    drawLegBase(true);
+    glRotatef(rightLegAngle, 1, 0, 0);
+    drawLegBase(false);
     glPopMatrix();
 }
 
@@ -1004,7 +1004,7 @@ void drawProceduralArmPart(float length,
     }
 }
 
-void drawProceduralArmBase(bool isRight, float fistProgress, int part)
+void drawProceduralArmBase(bool isLeft, float fistProgress, int part)
 {
     GLUquadric* quad = gluNewQuadric();
     gluQuadricTexture(quad, GL_TRUE);
@@ -1024,7 +1024,7 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
     if (part == 0) {
         // 2. Torso Connector Cylinder (Static part)
         glPushMatrix();
-        glRotatef(isRight ? -90.0f : 90.0f, 0.0f, 1.0f, 0.0f);
+        glRotatef(isLeft ? 90.0f : -90.0f, 0.0f, 1.0f, 0.0f);
         gluCylinder(quad, 0.12f, 0.12f, 0.22f, 32, 2);
         glPopMatrix();
     } else {
@@ -1048,7 +1048,7 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
     // Shift the arm mesh down to make the shoulder connector cylinder visible
     glTranslatef(0.0f, 0.0f, 0.18f); 
     // Apply outward tilt to the WHOLE arm (from joint down)
-    glRotatef(isRight?10.0f:-10.0f, 0, 1, 0);
+    glRotatef(isLeft?-10.0f:10.0f, 0, 1, 0);
 
     // ---- Upper arm clothing ----
     glDisable(GL_TEXTURE_2D);
@@ -1063,13 +1063,13 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
 
     // 2. Pauldron
     glPushMatrix();
-    glTranslatef(isRight?0.115f:-0.115f, 0.0f, 0.05f);
-    glRotatef(isRight?15.0f:-15.0f, 0,1,0);
+    glTranslatef(isLeft?-0.115f:0.115f, 0.0f, 0.05f);
+    glRotatef(isLeft?-15.0f:15.0f, 0,1,0);
     glRotatef(10.0f, 1,0,0);
-    float peakZ=0.25f, peakX=isRight?0.06f:-0.06f, width=0.13f;
+    float peakZ=0.25f, peakX=isLeft?-0.06f:0.06f, width=0.13f;
     glColor3f(0.2f,0.22f,0.3f);
     glBegin(GL_TRIANGLES);
-    float nx_p=isRight?1.0f:-1.0f;
+    float nx_p=isLeft?-1.0f:1.0f;
     glNormal3f(nx_p,0,0);
     glVertex3f(0,0,-0.08f); glVertex3f(0,-width,0.1f); glVertex3f(peakX,0,peakZ);
     glVertex3f(0,0,-0.08f); glVertex3f(peakX,0,peakZ); glVertex3f(0,width,0.1f);
@@ -1077,7 +1077,7 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
     glVertex3f(0,width,0.1f); glVertex3f(peakX,0,peakZ); glVertex3f(0,0,0.35f);
     glEnd();
     glBindTexture(GL_TEXTURE_2D, texGold); glColor3f(1,1,1);
-    float ox=isRight?0.002f:-0.002f;
+    float ox=isLeft?-0.002f:0.002f;
     glLineWidth(3.0f);
     glBegin(GL_LINE_LOOP);
     glVertex3f(ox,0,-0.08f); glVertex3f(ox,-width,0.1f);
@@ -1167,10 +1167,10 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
 
     // Wrist joint
     glTranslatef(0,0,0.53f);
-    glRotatef(isRight?-90.0f:90.0f,0,0,1);
+    glRotatef(isLeft?90.0f:-90.0f,0,0,1);
 
     // Dynamic wrist tilt when opening the fan
-    if (isRight && weapon2_status) {
+    if (isLeft && weapon2_status) {
         float tilt = (fanSpreadAngle / 140.0f) * 60.0f;
         glRotatef(tilt, 0, 0, 1);
     }
@@ -1189,15 +1189,15 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
 
     // Thumb
     glPushMatrix();
-    glTranslatef(isRight?-knuckleRx*0.85f:knuckleRx*0.85f,-knuckleRy*0.8f,handLength*0.35f);
-    glRotatef(isRight?-35.0f:35.0f,0,1,0);
+    glTranslatef(isLeft?knuckleRx*0.85f:-knuckleRx*0.85f,-knuckleRy*0.8f,handLength*0.35f);
+    glRotatef(isLeft?35.0f:-35.0f,0,1,0);
     glRotatef(10.0f,1,0,0);
-    glRotatef(isRight?(fistProgress*65.0f):(-fistProgress*65.0f),0,1,0);
+    glRotatef(isLeft?(-fistProgress*65.0f):(fistProgress*65.0f),0,1,0);
     glRotatef(fistProgress*15.0f,1,0,0);
     glPushMatrix(); gluSphere(quad,0.016f,16,16); glPopMatrix();
     drawProceduralArmPart(0.065f,0.016f,0.016f,0.014f,0.014f,16,16,0.003f,0.5f);
     glTranslatef(0,0,0.065f); gluSphere(quad,0.014f,16,16);
-    glRotatef(isRight?(fistProgress*60.0f):(-fistProgress*60.0f),0,1,0);
+    glRotatef(isLeft?(-fistProgress*60.0f):(fistProgress*60.0f),0,1,0);
     glRotatef(fistProgress*5.0f,1,0,0);
     drawProceduralArmPart(0.05f,0.014f,0.014f,0.011f,0.011f,16,16,0.002f,0.5f);
     glTranslatef(0,0,0.05f); gluSphere(quad,0.011f,16,16);
@@ -1212,10 +1212,10 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
     float fingerZOff[]  ={0.007f,0.016f,0.01f,0.0f};
     for(int i=0;i<4;i++){
         glPushMatrix();
-        glTranslatef(isRight?-fingerPos[i]:fingerPos[i],0,fingerZOff[i]);
+        glTranslatef(isLeft?fingerPos[i]:-fingerPos[i],0,fingerZOff[i]);
         float rx=0.014f,ry=0.012f;
         glPushMatrix(); gluSphere(quad,rx,16,16); glPopMatrix();
-        glRotatef(isRight?-fingerAng[i]:fingerAng[i],0,1,0);
+        glRotatef(isLeft?fingerAng[i]:-fingerAng[i],0,1,0);
 
         // Standard tight fist curling
         float j1Base = 12.0f;
@@ -1239,8 +1239,8 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
     }
 
     // ---- Weapon 1: Meteor Hammer ----
-    // Held on RIGHT arm (appears on screen LEFT when character faces camera)
-    if (isRight && weapon1_status) {
+    // Held on LEFT arm (appears on screen RIGHT when character faces camera)
+    if (isLeft && weapon1_status) {
         glPushMatrix();
 
         // NOTE: We are currently at the KNUCKLE origin (after glTranslatef(0,0,handLength)).
@@ -1258,8 +1258,8 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
     }
 
     // ---- Weapon 2: Fan (starts folded) ----
-    // Held on RIGHT arm (appears on screen LEFT when character faces camera)
-    if (isRight && weapon2_status) {
+    // Held on LEFT arm (appears on screen RIGHT when character faces camera)
+    if (isLeft && weapon2_status) {
         glPushMatrix();
         // Counter-rotate the weapon so it doesn't follow the hand tilt
         float tilt = (fanSpreadAngle / 140.0f) * 60.0f;
@@ -1282,7 +1282,7 @@ void drawProceduralArmBase(bool isRight, float fistProgress, int part)
             glRotatef(5.0f, 1.0f, 0.0f, 0.0f);
             glRotatef(10.0f, 0.0f, 1.0f, 0.0f);
             glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-            glRotatef(rightArmAngle + walkArmSwing, 1.0f, 0.0f, 0.0f);
+            glRotatef(leftArmAngle - walkArmSwing, 1.0f, 0.0f, 0.0f);
 
             // Move purely forward (+Z in character space)
             glTranslatef(0.0f, 0.0f, kAnimDistance);
@@ -1324,13 +1324,13 @@ void drawLeftArm()
     // 1. Draw Static shoulder part (connector) — not affected by arm rotation
     glPushMatrix();
     glRotatef(90, 1, 0, 0); 
-    drawProceduralArmBase(true, rightFistProgress, 0); // part 0 = static
+    drawProceduralArmBase(true, leftFistProgress, 0); // part 0 = static
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
-    glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0); 
+    glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0); 
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(true, rightFistProgress, 1); // part 1 = rotating
+    drawProceduralArmBase(true, leftFistProgress, 1); // part 1 = rotating
     glPopMatrix();
 }
 
@@ -1342,13 +1342,13 @@ void drawRightArm()
     // 1. Draw Static shoulder part (connector) — not affected by arm rotation
     glPushMatrix();
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, leftFistProgress, 0); // part 0 = static
+    drawProceduralArmBase(false, rightFistProgress, 0); // part 0 = static
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
-    glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0);
+    glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0);
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, leftFistProgress, 1); // part 1 = rotating
+    drawProceduralArmBase(false, rightFistProgress, 1); // part 1 = rotating
     glPopMatrix();
 }
 
