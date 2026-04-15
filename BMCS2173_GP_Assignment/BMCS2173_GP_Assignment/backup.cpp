@@ -36,17 +36,10 @@ float rightLegAngle = 0.0f;
 bool  attackAnimation = false;
 float attackAngle     = 0.0f;
 
-bool leftFingerActive[5] = {false, false, false, false, false};
-float leftFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-
-bool rightFingerActive[5] = {false, false, false, false, false};
-float rightFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-
-bool leftHandRotated = false;
-float leftHandRotAngle = 0.0f;
-
-bool rightHandRotated = false;
-float rightHandRotAngle = 0.0f;
+bool  leftFistActive   = false;
+bool  rightFistActive  = false;
+float leftFistProgress  = 0.0f;
+float rightFistProgress = 0.0f;
 
 // Movement and key state
 float charX = 0.0f;
@@ -68,10 +61,9 @@ float kAnimDistance    = 0.0f;
 float kAnimSpin        = 0.0f;
 bool  preK_weapon1_status = false;
 bool  preK_weapon2_status = false;
-bool  preK_leftFingerActive[5] = {false, false, false, false, false};
-float preK_leftFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+bool  preK_leftFistActive = false;
+float preK_leftFistProgress = 0.0f;
 float preK_fanTargetAngle = 0.0f;
-bool isNight = false;
 
 DWORD lastTime = 0;
 
@@ -165,13 +157,8 @@ void resetAll()
     leftLegAngle  = 0.0f; rightLegAngle = 0.0f;
 
     attackAnimation = false; attackAngle = 0.0f;
-    for (int i = 0; i < 5; i++) {
-        leftFingerActive[i] = false; rightFingerActive[i] = false;
-        leftFingerProgress[i] = 0.0f; rightFingerProgress[i] = 0.0f;
-    }
-    
-    leftHandRotated = false; rightHandRotated = false;
-    leftHandRotAngle = 0.0f; rightHandRotAngle = 0.0f;
+    leftFistActive  = false; rightFistActive = false;
+    leftFistProgress = 0.0f; rightFistProgress = 0.0f;
 
     charX = 0.0f; charZ = 0.0f; charRotation = 0.0f;
     walkPhase = 0.0f; walkArmSwing = 0.0f;
@@ -179,14 +166,14 @@ void resetAll()
 
     weapon1_status = false;
     weapon2_status = false;
+    leftFistActive = false;
+    rightFistActive = false;
     fanTargetAngle = 0.0f;
 
     kAnimationActive = false;
     kAnimProgress = 0.0f;
     kAnimDistance = 0.0f;
     kAnimSpin = 0.0f;
-
-    isNight = false;
 
     updateCamera();
 }
@@ -447,28 +434,15 @@ void updateAnimation()
     lastTime = currentTime;
 
     float speed = 0.5f;
-    for(int i = 0; i < 5; i++) {
-        if (rightFingerActive[i]) rightFingerProgress[i] += speed * dt;
-        else                      rightFingerProgress[i] -= speed * dt;
-        if (rightFingerProgress[i] > 1.0f) rightFingerProgress[i] = 1.0f;
-        if (rightFingerProgress[i] < 0.0f) rightFingerProgress[i] = 0.0f;
+    if (rightFistActive) rightFistProgress += speed * dt;
+    else                 rightFistProgress -= speed * dt;
+    if (rightFistProgress > 1.0f) rightFistProgress = 1.0f;
+    if (rightFistProgress < 0.0f) rightFistProgress = 0.0f;
 
-        if (leftFingerActive[i]) leftFingerProgress[i] += speed * dt;
-        else                     leftFingerProgress[i] -= speed * dt;
-        if (leftFingerProgress[i] > 1.0f) leftFingerProgress[i] = 1.0f;
-        if (leftFingerProgress[i] < 0.0f) leftFingerProgress[i] = 0.0f;
-    }
-
-    float handRotSpeed = 180.0f; // degrees per second
-    if (leftHandRotated) leftHandRotAngle += handRotSpeed * dt;
-    else                 leftHandRotAngle -= handRotSpeed * dt;
-    if (leftHandRotAngle > 60.0f) leftHandRotAngle = 60.0f;
-    if (leftHandRotAngle < 0.0f) leftHandRotAngle = 0.0f;
-
-    if (rightHandRotated) rightHandRotAngle += handRotSpeed * dt;
-    else                  rightHandRotAngle -= handRotSpeed * dt;
-    if (rightHandRotAngle > 60.0f) rightHandRotAngle = 60.0f;
-    if (rightHandRotAngle < 0.0f) rightHandRotAngle = 0.0f;
+    if (leftFistActive) leftFistProgress += speed * dt;
+    else                leftFistProgress -= speed * dt;
+    if (leftFistProgress > 1.0f) leftFistProgress = 1.0f;
+    if (leftFistProgress < 0.0f) leftFistProgress = 0.0f;
 
     if (attackAnimation) {
         attackAngle += 2.0f;
@@ -538,10 +512,8 @@ void updateAnimation()
             kAnimDistance = 0.0f;
             weapon1_status = preK_weapon1_status;
             weapon2_status = preK_weapon2_status;
-            for(int i=0; i<5; i++) {
-                leftFingerActive[i] = preK_leftFingerActive[i];
-                leftFingerProgress[i] = preK_leftFingerActive[i] ? 1.0f : 0.0f; // Instant restore
-            }
+            leftFistActive = preK_leftFistActive;
+            leftFistProgress = preK_leftFistActive ? 1.0f : 0.0f; // Instant restore
             fanTargetAngle = preK_fanTargetAngle;
         }
         
@@ -572,14 +544,12 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case VK_SPACE: resetAll(); break;
 
         // Camera orbit / height / zoom
-        case VK_LEFT:  if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle -= 0.05f; break;
-        case VK_RIGHT: if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle += 0.05f; break;
-        case VK_UP:    if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraHeight += 0.3f; break;
+        case VK_LEFT:      cameraAngle   -= 0.05f; break;
+        case VK_RIGHT:     cameraAngle   += 0.05f; break;
+        case VK_UP:        cameraHeight  += 0.3f;  break;
         case VK_DOWN:
-            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
-                cameraHeight -= 0.3f;
-                if (cameraHeight < 0.5f) cameraHeight = 0.5f;
-            }
+            cameraHeight -= 0.3f;
+            if (cameraHeight < 0.5f) cameraHeight = 0.5f;
             break;
         case VK_ADD:    case VK_OEM_PLUS:  cameraDistance -= 0.3f; break;
         case VK_SUBTRACT: case VK_OEM_MINUS: cameraDistance += 0.3f; break;
@@ -593,72 +563,32 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case VK_F1:
             if (weapon2_status) weapon2_status = false;
             weapon1_status = !weapon1_status;
-            for(int i=0; i<5; i++) leftFingerActive[i] = (weapon1_status || weapon2_status);
+            leftFistActive = (weapon1_status || weapon2_status);
             break;
 
         case VK_F2:
             if (weapon1_status) weapon1_status = false;
             weapon2_status = !weapon2_status;
-            for(int i=0; i<5; i++) leftFingerActive[i] = (weapon1_status || weapon2_status);
+            leftFistActive = (weapon1_status || weapon2_status);
             if (weapon2_status) fanTargetAngle = 0.0f; 
             break;
 
         case '5':
-        case 'O':
-            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                rightFingerActive[0] = !rightFingerActive[0];
-            } else if (weapon2_status) {
-                // Toggle fan open/close if it is equipped
+            // Toggle fan open/close if it is equipped
+            if (weapon2_status) {
                 fanTargetAngle = (fanTargetAngle > 70.0f) ? 0.0f : 140.0f;
             }
             break;
 
-        // Hand / Palm Rotation Toggle
-        case 'F': leftHandRotated = !leftHandRotated; break;
-        case 'G': rightHandRotated = !rightHandRotated; break;
+        // Attack animation
+        case 'F': attackAnimation = true; attackAngle = 0; break;
 
-        // Individual Finger toggles (Shift + Top Row 0-9)
-        case '0': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) leftFingerActive[0] = !leftFingerActive[0]; break;
-        case '3': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) leftFingerActive[3] = !leftFingerActive[3]; break;
-        case '4': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) leftFingerActive[4] = !leftFingerActive[4]; break;
-        case '6': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[1] = !rightFingerActive[1]; break;
-        case '7': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[2] = !rightFingerActive[2]; break;
-        case '8': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[3] = !rightFingerActive[3]; break;
-        case '9': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[4] = !rightFingerActive[4]; break;
-
-        // Individual Finger toggles (Numpad, direct keys)
-        case VK_NUMPAD0: leftFingerActive[0] = !leftFingerActive[0]; break;
-        case VK_NUMPAD1: leftFingerActive[1] = !leftFingerActive[1]; break;
-        case VK_NUMPAD2: leftFingerActive[2] = !leftFingerActive[2]; break;
-        case VK_NUMPAD3: leftFingerActive[3] = !leftFingerActive[3]; break;
-        case VK_NUMPAD4: leftFingerActive[4] = !leftFingerActive[4]; break;
-        case VK_NUMPAD5: rightFingerActive[0] = !rightFingerActive[0]; break;
-        case VK_NUMPAD6: rightFingerActive[1] = !rightFingerActive[1]; break;
-        case VK_NUMPAD7: rightFingerActive[2] = !rightFingerActive[2]; break;
-        case VK_NUMPAD8: rightFingerActive[3] = !rightFingerActive[3]; break;
-        case VK_NUMPAD9: rightFingerActive[4] = !rightFingerActive[4]; break;
-
-        // Fist toggle  (1 = right, 2 = left, and Shift combinations)
-        case '1':
-        case 'N': 
-            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                leftFingerActive[1] = !leftFingerActive[1];
-            } else {
-                if (kAnimationActive) break; // blocked during K animation
-                if (weapon1_status || weapon2_status) break;
-                bool newState = !leftFingerActive[0];
-                for (int i = 0; i < 5; i++) leftFingerActive[i] = newState;
-            }
-            break;
-            
-        case '2':
-        case 'M': 
-            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                leftFingerActive[2] = !leftFingerActive[2];
-            } else {
-                bool newState = !rightFingerActive[0];
-                for (int i = 0; i < 5; i++) rightFingerActive[i] = newState;
-            }
+        // Fist toggle  (1 = right, 2 = left)
+        case '2': rightFistActive = !rightFistActive; break;
+        case '1': 
+            if (kAnimationActive) break; // blocked during K animation
+            if (weapon1_status || weapon2_status) break;
+            leftFistActive  = !leftFistActive;  
             break;
 
         case 'K':
@@ -671,20 +601,14 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 // Store previous states
                 preK_weapon1_status = weapon1_status;
                 preK_weapon2_status = weapon2_status;
-                for(int i=0; i<5; i++) {
-                    preK_leftFingerActive[i] = leftFingerActive[i];
-                    preK_leftFingerProgress[i] = leftFingerProgress[i];
-                    leftFingerActive[i] = false;    // The hands open
-                    leftFingerProgress[i] = 0.0f;   // Instant open
-                }
+                preK_leftFistActive = leftFistActive;
+                preK_leftFistProgress = leftFistProgress;
                 preK_fanTargetAngle = fanTargetAngle;
                 
                 weapon1_status = false;    // Hide meteor hammer temporarily
+                leftFistActive = false;    // The hands open
+                leftFistProgress = 0.0f;   // Instant open
             }
-            break;
-
-        case 'P':
-            isNight = !isNight;
             break;
         }
         break;
@@ -733,23 +657,11 @@ void setupLighting()
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glShadeModel(GL_SMOOTH);
 
-    float lightX = 12.0f, lightY = 18.0f, lightZ = -30.0f;
-    GLfloat lightPos[] = { lightX, lightY, lightZ, 1.0f };
-    
-    GLfloat ambient[4], diffuse[4], specular[4];
-
-    if (!isNight) {
-        // Day values
-        ambient[0] = 0.35f; ambient[1] = 0.35f; ambient[2] = 0.30f; ambient[3] = 1.0f;
-        diffuse[0] = 1.0f;  diffuse[1] = 0.95f; diffuse[2] = 0.80f; diffuse[3] = 1.0f;
-        specular[0] = 1.0f; specular[1] = 1.0f;  specular[2] = 0.90f; specular[3] = 1.0f;
-    } else {
-        // Night values (Dimmer, bluer)
-        ambient[0] = 0.10f; ambient[1] = 0.10f; ambient[2] = 0.18f; ambient[3] = 1.0f;
-        diffuse[0] = 0.25f; diffuse[1] = 0.25f; diffuse[2] = 0.40f; diffuse[3] = 1.0f;
-        specular[0] = 0.20f; specular[1] = 0.20f; specular[2] = 0.30f; specular[3] = 1.0f;
-    }
-
+    float sunX = 12.0f, sunY = 18.0f, sunZ = -30.0f;
+    GLfloat lightPos[]  = { sunX, sunY, sunZ, 1.0f };
+    GLfloat ambient[]   = { 0.35f, 0.35f, 0.30f, 1.0f };
+    GLfloat diffuse[]   = { 1.0f,  0.95f, 0.80f, 1.0f };
+    GLfloat specular[]  = { 1.0f,  1.0f,  0.90f, 1.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
     glLightfv(GL_LIGHT0, GL_AMBIENT,  ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE,  diffuse);
@@ -817,35 +729,13 @@ void drawSun(float sx, float sy, float sz)
     glEnable(GL_LIGHTING);
 }
 
-void drawMoon(float mx, float my, float mz)
-{
-    GLUquadric* q = gluNewQuadric();
-    glDisable(GL_LIGHTING);
-    glDisable(GL_TEXTURE_2D);
-
-    // Main moon body (pale silver)
-    glColor3f(0.9f, 0.9f, 0.95f);
-    glPushMatrix(); glTranslatef(mx, my, mz); gluSphere(q, 1.5f, 32, 32); glPopMatrix();
-
-    // Subtle glow (very pale blue)
-    glColor3f(0.7f, 0.7f, 0.9f);
-    glPushMatrix(); glTranslatef(mx, my, mz); gluSphere(q, 1.7f, 32, 32); glPopMatrix();
-
-    gluDeleteQuadric(q);
-    glEnable(GL_LIGHTING);
-}
-
 void drawBackground()
 {
-    float lightX = 12.0f, lightY = 18.0f, lightZ = -30.0f;
-    GLfloat lightPos[] = { lightX, lightY, lightZ, 1.0f };
+    float sunX = 12.0f, sunY = 18.0f, sunZ = -30.0f;
+    GLfloat lightPos[] = { sunX, sunY, sunZ, 1.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
 
-    if (!isNight) {
-        drawSun(lightX, lightY, lightZ);
-    } else {
-        drawMoon(lightX, lightY, lightZ);
-    }
+    drawSun(sunX, sunY, sunZ);
 
     drawCloud(-18.0f, 14.0f, -40.0f, 1.5f);
     drawCloud(-25.0f, 16.0f, -35.0f, 1.2f);
@@ -1114,7 +1004,7 @@ void drawProceduralArmPart(float length,
     }
 }
 
-void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
+void drawProceduralArmBase(bool isLeft, float fistProgress, int part)
 {
     GLUquadric* quad = gluNewQuadric();
     gluQuadricTexture(quad, GL_TRUE);
@@ -1285,13 +1175,6 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
         glRotatef(tilt, 0, 0, 1);
     }
 
-    // Toggleable Hand/Palm rotation (60 degree twist)
-    if (isLeft) {
-        glRotatef(leftHandRotAngle, 0, 0, 1);
-    } else {
-        glRotatef(-rightHandRotAngle, 0, 0, 1);
-    }
-
     // Hand palm
     float knuckleRx=0.06f, knuckleRy=0.025f, handLength=0.16f;
     glRotatef(isLeft?5:-5,0,1,0);
@@ -1309,14 +1192,13 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     glTranslatef(isLeft?knuckleRx*0.85f:-knuckleRx*0.85f,-knuckleRy*0.8f,handLength*0.35f);
     glRotatef(isLeft?35.0f:-35.0f,0,1,0);
     glRotatef(10.0f,1,0,0);
-    float thumbProg = fingerProgress[0];
-    glRotatef(isLeft?(-thumbProg*65.0f):(thumbProg*65.0f),0,1,0);
-    glRotatef(thumbProg*15.0f,1,0,0);
+    glRotatef(isLeft?(-fistProgress*65.0f):(fistProgress*65.0f),0,1,0);
+    glRotatef(fistProgress*15.0f,1,0,0);
     glPushMatrix(); gluSphere(quad,0.016f,16,16); glPopMatrix();
     drawProceduralArmPart(0.065f,0.016f,0.016f,0.014f,0.014f,16,16,0.003f,0.5f);
     glTranslatef(0,0,0.065f); gluSphere(quad,0.014f,16,16);
-    glRotatef(isLeft?(-thumbProg*60.0f):(thumbProg*60.0f),0,1,0);
-    glRotatef(thumbProg*5.0f,1,0,0);
+    glRotatef(isLeft?(-fistProgress*60.0f):(fistProgress*60.0f),0,1,0);
+    glRotatef(fistProgress*5.0f,1,0,0);
     drawProceduralArmPart(0.05f,0.014f,0.014f,0.011f,0.011f,16,16,0.002f,0.5f);
     glTranslatef(0,0,0.05f); gluSphere(quad,0.011f,16,16);
     glPopMatrix();
@@ -1329,7 +1211,6 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     float fingerAng[]   ={6.0f,0.0f,-4.0f,-10.0f};
     float fingerZOff[]  ={0.007f,0.016f,0.01f,0.0f};
     for(int i=0;i<4;i++){
-        float currFingerProg = fingerProgress[i+1];
         glPushMatrix();
         glTranslatef(isLeft?fingerPos[i]:-fingerPos[i],0,fingerZOff[i]);
         float rx=0.014f,ry=0.012f;
@@ -1339,19 +1220,19 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
         // Standard tight fist curling
         float j1Base = 12.0f;
         float j1Fist = 80.0f;
-        glRotatef(j1Base + currFingerProg*j1Fist, 1,0,0);
+        glRotatef(j1Base + fistProgress*j1Fist, 1,0,0);
         drawProceduralArmPart(fingerLen[i],rx,ry,rx*0.9f,ry*0.9f,16,16,0.003f,0.5f);
         glTranslatef(0,0,fingerLen[i]); gluSphere(quad,rx*0.9f,16,16);
 
         float j2Base = 25.0f;
         float j2Fist = 75.0f;
-        glRotatef(j2Base + currFingerProg*j2Fist, 1,0,0);
+        glRotatef(j2Base + fistProgress*j2Fist, 1,0,0);
         drawProceduralArmPart(fingerLen[i]*0.7f,rx*0.9f,ry*0.9f,rx*0.75f,ry*0.75f,16,16,0.002f,0.5f);
         glTranslatef(0,0,fingerLen[i]*0.7f); gluSphere(quad,rx*0.75f,16,16);
 
         float j3Base = 20.0f;
         float j3Fist = 70.0f;
-        glRotatef(j3Base + currFingerProg*j3Fist, 1,0,0);
+        glRotatef(j3Base + fistProgress*j3Fist, 1,0,0);
         drawProceduralArmPart(fingerLen[i]*0.5f,rx*0.75f,ry*0.75f,rx*0.6f,ry*0.6f,16,16,0.001f,0.5f);
         glTranslatef(0,0,fingerLen[i]*0.5f); gluSphere(quad,rx*0.6f,16,16);
         glPopMatrix();
@@ -1443,13 +1324,13 @@ void drawLeftArm()
     // 1. Draw Static shoulder part (connector) — not affected by arm rotation
     glPushMatrix();
     glRotatef(90, 1, 0, 0); 
-    drawProceduralArmBase(true, leftFingerProgress, 0); // part 0 = static
+    drawProceduralArmBase(true, leftFistProgress, 0); // part 0 = static
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
     glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0); 
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(true, leftFingerProgress, 1); // part 1 = rotating
+    drawProceduralArmBase(true, leftFistProgress, 1); // part 1 = rotating
     glPopMatrix();
 }
 
@@ -1461,13 +1342,13 @@ void drawRightArm()
     // 1. Draw Static shoulder part (connector) — not affected by arm rotation
     glPushMatrix();
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, rightFingerProgress, 0); // part 0 = static
+    drawProceduralArmBase(false, rightFistProgress, 0); // part 0 = static
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
     glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0);
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, rightFingerProgress, 1); // part 1 = rotating
+    drawProceduralArmBase(false, rightFistProgress, 1); // part 1 = rotating
     glPopMatrix();
 }
 
@@ -1998,13 +1879,6 @@ void drawCharacter()
 
 void display()
 {
-    if (!isNight) {
-        glClearColor(0.45f, 0.72f, 0.95f, 1.0f); // sky blue
-    } else {
-        glClearColor(0.02f, 0.02f, 0.12f, 1.0f); // dark navy
-    }
-
-    setupLighting(); // Update light intensities
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
 
