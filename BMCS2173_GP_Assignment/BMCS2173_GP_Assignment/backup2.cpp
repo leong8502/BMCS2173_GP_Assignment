@@ -4,6 +4,7 @@
 #include <gl/GLU.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #pragma comment (lib, "OpenGL32.lib")
 #pragma comment (lib, "GLU32.lib")
@@ -23,6 +24,7 @@ float cameraAngle = 0.0f;
 float cameraHeight = 2.0f;
 float cameraDistance = 8.0f;
 float cameraX, cameraY, cameraZ;
+float cameraViewMatrix[16];
 
 //================================
 // Character joint / animation variables
@@ -71,7 +73,23 @@ bool  preK_weapon2_status = false;
 bool  preK_leftFingerActive[5] = {false, false, false, false, false};
 float preK_leftFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 float preK_fanTargetAngle = 0.0f;
+
+// J animation variables
+bool  jAnimationActive = false;
+float jAnimProgress    = 0.0f;
+float jAnimChainExtend = 0.0f;
+float jAnimHammerScale = 1.0f;
+float screenShakeTimer = 0.0f;
+float preJ_leftArmAngle = 0.0f;
+bool  preJ_leftFingerActive[5] = {false, false, false, false, false};
+float preJ_leftFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
 bool isNight = false;
+bool isShadowPass = false;
+
+float lightX = 12.0f;
+float lightY = 18.0f;
+float lightZ = -30.0f;
 
 DWORD lastTime = 0;
 
@@ -242,10 +260,16 @@ void drawMeteorHammer() {
     
     // Increase scale for better visibility and presence
     glPushMatrix();
-    glScalef(0.18f, 0.18f, 0.18f);
+    float weaponScale = 0.18f;
+    
+    // J skill scaling
+    float currentHammerScale = jAnimHammerScale;
+    glScalef(weaponScale, weaponScale, weaponScale);
 
     // 1. Wooden Handle
-    glBindTexture(GL_TEXTURE_2D, texWeaponWood);
+    if (!isShadowPass) {
+        glBindTexture(GL_TEXTURE_2D, texWeaponWood);
+    }
     glPushMatrix();
     glTranslatef(0.0f, -0.9f, 0.0f); // Centering handle in hand
     glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
@@ -267,40 +291,119 @@ void drawMeteorHammer() {
 
     // 3. Chains
     glBindTexture(GL_TEXTURE_2D, texWeaponChain);
-    for (int i = 0; i < 8; i++) {
+    // Link 0: Fixed to handle
+    glPushMatrix();
+    glTranslatef(0.0f, 1.1f, 0.0f);
+    glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+    glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+    drawChainLink(quad, 0.045f, 0.10f, 0.12f, 15, 15);
+    glPopMatrix();
+
+    // CENTRIFUGAL FORCE OVERRIDE for J animation
+    // Skip hanging down logic if J animation is in full spin
+    bool skipHanging = false;
+    if (jAnimationActive) {
+        // Rotation check: after first 180 degrees (roughly 0.5s into a 2s spin)
+        if (jAnimProgress > 0.25f) skipHanging = true;
+    }
+
+    if (!skipHanging) {
+        // Normal hanging/gravity logic
         glPushMatrix();
-        glTranslatef(0.0f, 1.1f + i * 0.32f, 0.0f);
-        if (i % 2 == 0) glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
-        glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
-        drawChainLink(quad, 0.045f, 0.10f, 0.12f, 15, 15);
+        glTranslatef(0.0f, 1.26f, 0.0f); 
+        
+        float slantAngle = 5.0f + (jAnimationActive ? 0 : leftArmAngle) * 0.20f;
+        if (slantAngle > 35.0f) slantAngle = 35.0f;
+
+        glPushMatrix();
+        glLoadMatrixf(cameraViewMatrix);
+        glRotatef(charRotation, 0.0f, 1.0f, 0.0f);
+        float charM[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, charM);
+        glPopMatrix();
+
+        float m[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, m);
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                m[i * 4 + j] = charM[i * 4 + j] * weaponScale;
+            }
+        }
+        glLoadMatrixf(m);
+        glRotatef(-slantAngle, 0.0f, 0.0f, 1.0f);
+
+        int numChains = 16 + (int)(jAnimChainExtend / 0.32f);
+        for (int i = 1; i < numChains; i++) {
+            glPushMatrix();
+            glTranslatef(0.0f, -(0.16f + (i - 1) * 0.32f), 0.0f);
+            if (i % 2 == 0) glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+            glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+            drawChainLink(quad, 0.045f, 0.10f, 0.12f, 15, 15);
+            glPopMatrix();
+        }
+
+        glBindTexture(GL_TEXTURE_2D, texWeaponMetal);
+        glPushMatrix();
+        glTranslatef(0.0f, -(6.76f - 1.26f) - jAnimChainExtend, 0.0f); 
+        glScalef(currentHammerScale, currentHammerScale, currentHammerScale);
+        gluSphere(quad, 1.5f, 40, 40); 
+        // Spikes
+        int numLat = 5; int numLon = 8;
+        for (int lat = 1; lat < numLat; lat++) {
+            float theta = lat * (float)M_PI / numLat;
+            for (int lon = 0; lon < numLon; lon++) {
+                float phi = lon * 2 * (float)M_PI / numLon;
+                float x = sin(theta) * cos(phi); float z = sin(theta) * sin(phi); float y = cos(theta);
+                glPushMatrix();
+                glTranslatef(x * 1.4375f, y * 1.4375f, z * 1.4375f);
+                float angle = acos(z) * 180.0f / (float)M_PI;
+                float len = sqrt(x*x + y*y);
+                if (len > 0.0001f) glRotatef(angle, -y, x, 0.0f);
+                else if (z < 0) glRotatef(180.0f, 1.0f, 0.0f, 0.0f);
+                gluCylinder(quad, 0.15f, 0.0f, 0.6875f, 10, 5);
+                glPopMatrix();
+            }
+        }
+        glPopMatrix();
+        glPopMatrix();
+    } else {
+        // Centrifugal force logic: Chain extends straight from handle
+        int numChains = 16 + (int)(jAnimChainExtend / 0.32f);
+        for (int i = 1; i < numChains; i++) {
+            glPushMatrix();
+            glTranslatef(0.0f, 1.1f + i * 0.32f, 0.0f);
+            if (i % 2 == 0) glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+            glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+            drawChainLink(quad, 0.045f, 0.10f, 0.12f, 15, 15);
+            glPopMatrix();
+        }
+
+        glBindTexture(GL_TEXTURE_2D, texWeaponMetal);
+        glPushMatrix();
+        glTranslatef(0.0f, 6.76f + jAnimChainExtend, 0.0f); 
+        glScalef(currentHammerScale, currentHammerScale, currentHammerScale);
+        gluSphere(quad, 1.5f, 40, 40); 
+        // Spikes
+        int numLat = 5; int numLon = 8;
+        for (int lat = 1; lat < numLat; lat++) {
+            float theta = lat * (float)M_PI / numLat;
+            for (int lon = 0; lon < numLon; lon++) {
+                float phi = lon * 2 * (float)M_PI / numLon;
+                float x = sin(theta) * cos(phi); float z = sin(theta) * sin(phi); float y = cos(theta);
+                glPushMatrix();
+                glTranslatef(x * 1.4375f, y * 1.4375f, z * 1.4375f);
+                float angle = acos(z) * 180.0f / (float)M_PI;
+                float len = sqrt(x*x + y*y);
+                if (len > 0.0001f) glRotatef(angle, -y, x, 0.0f);
+                else if (z < 0) glRotatef(180.0f, 1.0f, 0.0f, 0.0f);
+                gluCylinder(quad, 0.15f, 0.0f, 0.6875f, 10, 5);
+                glPopMatrix();
+            }
+        }
         glPopMatrix();
     }
 
-    // 4. Meteor Sphere
-    glBindTexture(GL_TEXTURE_2D, texWeaponMetal);
-    glPushMatrix();
-    glTranslatef(0.0f, 4.2f, 0.0f); 
-    gluSphere(quad, 1.2f, 40, 40); 
-    // Spikes (Cones)
-    int numLat = 5; int numLon = 8;
-    for (int lat = 1; lat < numLat; lat++) {
-        float theta = lat * (float)M_PI / numLat;
-        for (int lon = 0; lon < numLon; lon++) {
-            float phi = lon * 2 * (float)M_PI / numLon;
-            float x = sin(theta) * cos(phi); float z = sin(theta) * sin(phi); float y = cos(theta);
-            glPushMatrix();
-            glTranslatef(x * 1.15f, y * 1.15f, z * 1.15f);
-            float angle = acos(z) * 180.0f / (float)M_PI;
-            float len = sqrt(x*x + y*y);
-            if (len > 0.0001f) glRotatef(angle, -y, x, 0.0f);
-            else if (z < 0) glRotatef(180.0f, 1.0f, 0.0f, 0.0f);
-            gluCylinder(quad, 0.12f, 0.0f, 0.55f, 10, 5);
-            glPopMatrix();
-        }
-    }
-    glPopMatrix();
-
-    glPopMatrix();
+    glPopMatrix(); // End scale push
     gluDeleteQuadric(quad);
 }
 
@@ -398,8 +501,10 @@ void drawFan(float spreadAngle) {
     glPushMatrix();
     // Scale down to fit character hand
     glScalef(0.12f, 0.12f, 0.12f);
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texFanWood);
+    if (!isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texFanWood);
+    }
 
     // Pivot pin
     glPushMatrix();
@@ -521,7 +626,7 @@ void updateAnimation()
         if (fanSpreadAngle < fanTargetAngle) fanSpreadAngle = fanTargetAngle;
     }
 
-    // K animation update
+        // K animation update
     if (kAnimationActive) {
         float kSpeed = 1.0f; // total animation takes 2 seconds (0 to 2)
         kAnimProgress += kSpeed * dt;
@@ -547,6 +652,55 @@ void updateAnimation()
         
         // Spin the fan rapidly
         kAnimSpin += 1440.0f * dt; 
+    }
+
+    // J animation update
+    if (jAnimationActive) {
+        float jTotalDuration = 3.0f; // Total spin + strike duration
+        jAnimProgress += dt;
+        
+        float spinPhase = 2.0f; // Time for 5 loops
+        float strikePhase = 0.5f; // Time for extension
+        float impactWait = 0.5f; // Wait at ground
+
+        if (jAnimProgress <= spinPhase) {
+            // Phase 1: 360-degree spin loop (4.5 times) to end at OVERHEAD position
+            float spinProgress = jAnimProgress / spinPhase;
+            leftArmAngle = -(spinProgress * 1620.0f); // Ends at -1620 (UP)
+            jAnimChainExtend = 0.0f;
+            jAnimHammerScale = 1.0f;
+        } 
+        else if (jAnimProgress <= spinPhase + strikePhase) {
+            // Phase 2: Extension and Strike - Slam from UP to DOWN
+            float strikeProgress = (jAnimProgress - spinPhase) / strikePhase;
+            // From -1620 (UP) to -1800 (DOWN)
+            leftArmAngle = -1620.0f - strikeProgress * 135.0f; 
+            jAnimChainExtend = strikeProgress * 13.0f; 
+            jAnimHammerScale = 1.0f + strikeProgress * 1.5f; 
+        }
+        else if (jAnimProgress <= spinPhase + strikePhase + impactWait) {
+            // Phase 3: Impact!
+            if (screenShakeTimer <= 0.0f && jAnimProgress < spinPhase + strikePhase + 0.1f) {
+                screenShakeTimer = 0.5f; // Trigger shake on impact
+            }
+        }
+        else {
+            // Reset
+            jAnimationActive = false;
+            leftArmAngle = preJ_leftArmAngle;
+            for(int i=0; i<5; i++) {
+                leftFingerActive[i] = preJ_leftFingerActive[i];
+                leftFingerProgress[i] = preJ_leftFingerProgress[i];
+            }
+            jAnimChainExtend = 0.0f;
+            jAnimHammerScale = 1.0f;
+        }
+    }
+
+    // Update screen shake
+    if (screenShakeTimer > 0.0f) {
+        screenShakeTimer -= dt;
+        if (screenShakeTimer < 0.0f) screenShakeTimer = 0.0f;
     }
 }
 
@@ -617,15 +771,6 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case 'F': leftHandRotated = !leftHandRotated; break;
         case 'G': rightHandRotated = !rightHandRotated; break;
 
-        // Individual Finger toggles (Shift + Top Row 0-9)
-        case '0': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) leftFingerActive[0] = !leftFingerActive[0]; break;
-        case '3': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) leftFingerActive[3] = !leftFingerActive[3]; break;
-        case '4': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) leftFingerActive[4] = !leftFingerActive[4]; break;
-        case '6': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[1] = !rightFingerActive[1]; break;
-        case '7': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[2] = !rightFingerActive[2]; break;
-        case '8': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[3] = !rightFingerActive[3]; break;
-        case '9': if(GetAsyncKeyState(VK_SHIFT) & 0x8000) rightFingerActive[4] = !rightFingerActive[4]; break;
-
         // Individual Finger toggles (Numpad, direct keys)
         case VK_NUMPAD0: leftFingerActive[0] = !leftFingerActive[0]; break;
         case VK_NUMPAD1: leftFingerActive[1] = !leftFingerActive[1]; break;
@@ -686,6 +831,20 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case 'P':
             isNight = !isNight;
             break;
+
+        case 'J':
+            if (!jAnimationActive && !kAnimationActive && weapon1_status) {
+                jAnimationActive = true;
+                jAnimProgress = 0.0f;
+                // Save state
+                preJ_leftArmAngle = leftArmAngle;
+                for(int i=0; i<5; i++) {
+                    preJ_leftFingerActive[i] = leftFingerActive[i];
+                    preJ_leftFingerProgress[i] = leftFingerProgress[i];
+                    leftFingerActive[i] = true; // Grip weapon tight
+                }
+            }
+            break;
         }
         break;
 
@@ -733,8 +892,8 @@ void setupLighting()
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glShadeModel(GL_SMOOTH);
 
-    float lightX = 12.0f, lightY = 18.0f, lightZ = -30.0f;
-    GLfloat lightPos[] = { lightX, lightY, lightZ, 1.0f };
+    float lx = lightX, ly = lightY, lz = lightZ;
+    GLfloat lightPos[] = { lx, ly, lz, 1.0f };
     
     GLfloat ambient[4], diffuse[4], specular[4];
 
@@ -837,7 +996,6 @@ void drawMoon(float mx, float my, float mz)
 
 void drawBackground()
 {
-    float lightX = 12.0f, lightY = 18.0f, lightZ = -30.0f;
     GLfloat lightPos[] = { lightX, lightY, lightZ, 1.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
 
@@ -870,6 +1028,11 @@ void drawProceduralLegPart(float length, float topRx, float topRy,
                             int slices, int stacks,
                             float bulgeFactor, float bulgePos)
 {
+    if (isShadowPass) {
+        slices = (slices > 10) ? 10 : slices;
+        stacks = (stacks > 8) ? 8 : stacks;
+    }
+
     for (int i = 0; i < stacks; ++i) {
         float t1 = (float)i / stacks;
         float t2 = (float)(i + 1) / stacks;
@@ -885,26 +1048,38 @@ void drawProceduralLegPart(float length, float topRx, float topRy,
         float b2  = sin(t2*3.14159265f)*bulgeFactor*exp(-pow(t2-bulgePos,2)*10.0f);
         rx2+=b2; ry2+=b2;
 
+        if (isShadowPass) {
+            glColor3f(0.15f, 0.15f, 0.15f);
+            if (isNight) glColor3f(0.01f, 0.01f, 0.02f);
+        }
+
         glBegin(GL_QUAD_STRIP);
         for (int j = 0; j <= slices; ++j) {
             float theta = (float)j/slices * 2.0f*3.14159265f;
             float s     = (float)j/slices;
             float cosT  = cos(theta), sinT = sin(theta);
 
-            float nx1=ry1*cosT, ny1=rx1*sinT, nz1=(topRx-bottomRx)/length*((rx1+ry1)*0.5f);
-            float len1=sqrt(nx1*nx1+ny1*ny1+nz1*nz1);
-            if(len1>0){nx1/=len1;ny1/=len1;nz1/=len1;}
+            float nx1=0, ny1=0, nz1=0, nx2=0, ny2=0, nz2=0;
+            if (!isShadowPass) {
+                nx1=ry1*cosT; ny1=rx1*sinT; nz1=(topRx-bottomRx)/length*((rx1+ry1)*0.5f);
+                float len1=sqrt(nx1*nx1+ny1*ny1+nz1*nz1);
+                if(len1>0){nx1/=len1;ny1/=len1;nz1/=len1;}
 
-            float nx2=ry2*cosT, ny2=rx2*sinT, nz2=(topRx-bottomRx)/length*((rx2+ry2)*0.5f);
-            float len2=sqrt(nx2*nx2+ny2*ny2+nz2*nz2);
-            if(len2>0){nx2/=len2;ny2/=len2;nz2/=len2;}
+                nx2=ry2*cosT; ny2=rx2*sinT; nz2=(topRx-bottomRx)/length*((rx2+ry2)*0.5f);
+                float len2=sqrt(nx2*nx2+ny2*ny2+nz2*nz2);
+                if(len2>0){nx2/=len2;ny2/=len2;nz2/=len2;}
+            }
 
-            glNormal3f(nx2,ny2,nz2);
-            glTexCoord2f(s*2.0f, t2*2.0f);
+            if (!isShadowPass) {
+                glNormal3f(nx2,ny2,nz2);
+                glTexCoord2f(s*2.0f, t2*2.0f);
+            }
             glVertex3f(rx2*cosT, ry2*sinT, z2);
 
-            glNormal3f(nx1,ny1,nz1);
-            glTexCoord2f(s*2.0f, t1*2.0f);
+            if (!isShadowPass) {
+                glNormal3f(nx1,ny1,nz1);
+                glTexCoord2f(s*2.0f, t1*2.0f);
+            }
             glVertex3f(rx1*cosT, ry1*sinT, z1);
         }
         glEnd();
@@ -945,38 +1120,52 @@ void drawLegBase(bool isLeft)
     glRotatef(90, 1, 0, 0);  // leg points downward in Y-up space
 
     if (!isLeft) {
-        // Right leg: short sock (below knee)
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
-        // Right leg: lower calf
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
+        // Right leg logic
+        if (!isShadowPass) {
+            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
+        }
         drawProceduralLegPart(0.75f, 0.19f,0.20f, 0.12f,0.12f, 60,40, 0.015f,0.5f);
         glTranslatef(0,0,0.75f);
         gluSphere(quad, 0.095f, 40,40);
         drawProceduralLegPart(0.12f, 0.12f,0.12f, 0.13f,0.13f, 60,20, 0.005f,0.5f);
         glTranslatef(0,0,0.12f);
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+        if (!isShadowPass) {
+            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+        }
         drawProceduralLegPart(0.06f, 0.14f,0.14f, 0.13f,0.13f, 60,20, 0.0f,0.5f);
         drawRoundTrim(0.14f);
         glTranslatef(0,0,0.06f);
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texFabric);
+        if (!isShadowPass) {
+            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texFabric);
+        }
         drawProceduralLegPart(0.65f, 0.12f,0.12f, 0.07f,0.07f, 60,50, 0.015f,0.2f);
         glTranslatef(0,0,0.65f);
     } else {
         // Left leg: high sock (mid thigh)
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
+        if (!isShadowPass) {
+            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
+        }
         drawProceduralLegPart(0.45f, 0.19f,0.20f, 0.15f,0.15f, 60,40, 0.012f,0.5f);
         glTranslatef(0,0,0.45f);
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+        if (!isShadowPass) {
+            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+        }
         drawProceduralLegPart(0.06f, 0.16f,0.16f, 0.14f,0.14f, 60,20, 0.0f,0.5f);
         drawRoundTrim(0.16f);
         glTranslatef(0,0,0.06f);
-        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texFabric);
+        if (!isShadowPass) {
+            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texFabric);
+        }
         drawProceduralLegPart(0.24f, 0.14f,0.14f, 0.12f,0.12f, 60,30, 0.012f,0.5f);
         glTranslatef(0,0,0.24f);
         gluSphere(quad, 0.095f, 40,40);
         drawProceduralLegPart(0.12f, 0.12f,0.12f, 0.13f,0.13f, 60,20, 0.005f,0.5f);
         glTranslatef(0,0,0.12f);
-        drawProceduralLegPart(0.06f, 0.14f,0.14f, 0.13f,0.13f, 60,20, 0.0f,0.5f);
+        if (!isShadowPass) {
+            drawProceduralLegPart(0.06f, 0.14f,0.14f, 0.13f,0.13f, 60,20, 0.0f,0.5f);
+        } else {
+            drawProceduralLegPart(0.06f, 0.14f,0.14f, 0.13f,0.13f, 60,20, 0.0f,0.5f);
+        }
         glTranslatef(0,0,0.06f);
         drawProceduralLegPart(0.65f, 0.12f,0.12f, 0.07f,0.07f, 60,50, 0.015f,0.2f);
         glTranslatef(0,0,0.65f);
@@ -1065,6 +1254,10 @@ void drawProceduralArmPart(float length,
     float sweepStart = 0.0f, float sweepEnd = 2.0f*3.14159265f,
     float pleatDepth = 0.0f, int pleatCount = 0)
 {
+    if (isShadowPass) {
+        slices = (slices > 10) ? 10 : slices;
+        stacks = (stacks > 8) ? 8 : stacks;
+    }
     for (int i = 0; i < stacks; ++i) {
         float t1 = (float)i/stacks, t2 = (float)(i+1)/stacks;
         float z1 = t1*length, z2 = t2*length;
@@ -1076,6 +1269,11 @@ void drawProceduralArmPart(float length,
         float rx2=topRx*(1-t2)+bottomRx*t2, ry2=topRy*(1-t2)+bottomRy*t2;
         float b2=sin(t2*3.14159265f)*bulgeFactor*exp(-pow(t2-bulgePos,2)*10.0f);
         rx2+=b2; ry2+=b2;
+
+        if (isShadowPass) {
+            glColor3f(0.15f, 0.15f, 0.15f);
+            if (isNight) glColor3f(0.01f, 0.01f, 0.02f);
+        }
 
         glBegin(GL_QUAD_STRIP);
         for (int j = 0; j <= slices; ++j) {
@@ -1106,8 +1304,14 @@ void drawProceduralArmPart(float length,
             if(l2>0){nx2/=l2;ny2/=l2;nz2/=l2;}
 
             glColor3f(shade,shade,shade);
-            glNormal3f(nx2,ny2,nz2); glTexCoord2f(u,t2); glVertex3f(rx2p*cosT, ry2p*sinT, z2);
-            glNormal3f(nx1,ny1,nz1); glTexCoord2f(u,t1); glVertex3f(rx1p*cosT, ry1p*sinT, z1);
+            if (!isShadowPass) {
+                glNormal3f(nx2,ny2,nz2); glTexCoord2f(u,t2);
+            }
+            glVertex3f(rx2p*cosT, ry2p*sinT, z2);
+            if (!isShadowPass) {
+                glNormal3f(nx1,ny1,nz1); glTexCoord2f(u,t1);
+            }
+            glVertex3f(rx1p*cosT, ry1p*sinT, z1);
         }
         glEnd();
         glColor3f(1,1,1);
@@ -1120,8 +1324,10 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     gluQuadricTexture(quad, GL_TRUE);
     gluQuadricNormals(quad, GLU_SMOOTH);
 
-    glBindTexture(GL_TEXTURE_2D, texSkin);
-    glColor3f(1,1,1);
+    if (!isShadowPass) {
+        glBindTexture(GL_TEXTURE_2D, texSkin);
+        glColor3f(1,1,1);
+    }
 
     glPushMatrix();
 
@@ -1163,19 +1369,20 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     // ---- Upper arm clothing ----
     glDisable(GL_TEXTURE_2D);
 
-    // 1. Dark blue sleeve
-    glBindTexture(GL_TEXTURE_2D, texFabric);
-    glEnable(GL_TEXTURE_2D);
-    glColor3f(1,1,1);
+    if (!isShadowPass) {
+        glBindTexture(GL_TEXTURE_2D, texFabric);
+        glEnable(GL_TEXTURE_2D);
+        glColor3f(1,1,1);
+    }
     glPushMatrix();
     drawProceduralArmPart(0.53f,0.13f,0.13f,0.10f,0.10f,40,20,0.015f,0.5f);
     glPopMatrix();
 
     // 2. Pauldron
     glPushMatrix();
-    glTranslatef(isLeft?-0.115f:0.115f, 0.0f, 0.05f);
-    glRotatef(isLeft?-15.0f:15.0f, 0,1,0);
-    glRotatef(10.0f, 1,0,0);
+    glTranslatef(isLeft?-0.14f:0.14f, 0.0f, 0.05f);
+    glRotatef(isLeft?-3.0f:3.0f, 0,1,0);
+    glRotatef(0.0f, 1,0,0);
     float peakZ=0.25f, peakX=isLeft?-0.06f:0.06f, width=0.13f;
     glColor3f(0.2f,0.22f,0.3f);
     glBegin(GL_TRIANGLES);
@@ -1211,7 +1418,9 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     glPushMatrix();
     glTranslatef(0,0,0.35f);
 
-    glDisable(GL_TEXTURE_2D);
+    if (!isShadowPass) {
+        glDisable(GL_TEXTURE_2D);
+    }
     glColor3f(0.25f,0.15f,0.05f);
     GLUquadric* qBand=gluNewQuadric();
     gluQuadricNormals(qBand,GLU_SMOOTH);
@@ -1233,14 +1442,21 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     gluDeleteQuadric(qBand);
 
     glTranslatef(0,0,0.005f);
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texWhiteSleeve); glColor3f(1,1,1);
+    if (!isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texWhiteSleeve);
+    }
+    glColor3f(1,1,1);
     drawProceduralArmPart(0.42f,0.115f,0.115f,0.21f,0.21f,60,30,0.02f,0.5f,
                           0.0f,2.0f*3.14159265f,0.02f,8);
-    glDisable(GL_TEXTURE_2D);
+    if (!isShadowPass) {
+        glDisable(GL_TEXTURE_2D);
+    }
     glPopMatrix();
 
-    glEnable(GL_TEXTURE_2D);
+    if (!isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+    }
     glColor3f(1,1,1);
 
     // Upper arm skin
@@ -1369,10 +1585,16 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
         glTranslatef(0.0f, -0.032f, -0.032f);
 
         // Rotate -90deg around wrist Z so weapon +Y -> wrist +X -> world forward (+Z)
-        // For left arm: wrist +X = world forward => ball faces forward toward camera
         glRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
+        
+        // Align weapon main axis (Y) with arm axis (Z) so it points forward from hand
+        glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
 
-        drawMeteorHammer();
+        if (!isShadowPass) {
+            drawMeteorHammer();
+        } else {
+            drawMeteorHammer();
+        }
         glPopMatrix();
     }
 
@@ -1424,7 +1646,11 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
             glScalef(kScale, kScale, kScale);
         }
 
-        drawFan(fanSpreadAngle);
+        if (!isShadowPass) {
+            drawFan(fanSpreadAngle);
+        } else {
+            drawFan(fanSpreadAngle);
+        }
         glPopMatrix();
     }
 
@@ -1906,9 +2132,13 @@ void drawDressMesh()
 
 void drawBodyMesh()
 {
-    int stacks=60,slices=60;
+    int stacks = isShadowPass ? 12 : 60;
+    int slices = isShadowPass ? 12 : 60;
     float zMin=sections[1].z, zMax=sections[SEC_COUNT-2].z;
-    glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
+    if (!isShadowPass) {
+        glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
+        glEnable(GL_TEXTURE_2D);
+    }
     for(int i=0;i<stacks;i++){
         float f1=(float)i/stacks,f2=(float)(i+1)/stacks;
         float z1=zMin+f1*(zMax-zMin),z2=zMin+f2*(zMax-zMin);
@@ -1917,10 +2147,17 @@ void drawBodyMesh()
             float theta=(float)j/slices*2*3.14159f,s=(float)j/slices*2;
             float px2,py2,pz2,nx2,ny2,nz2;
             getTorsoVertex(z2,theta,px2,py2,pz2); getTorsoNormal(z2,theta,nx2,ny2,nz2);
-            glNormal3f(nx2,ny2,nz2); glTexCoord2f(s,f2*2); glVertex3f(px2,py2,pz2);
+            if (!isShadowPass) {
+                glNormal3f(nx2,ny2,nz2); glTexCoord2f(s,f2*2); 
+            }
+            glVertex3f(px2,py2,pz2);
+
             float px1,py1,pz1,nx1,ny1,nz1;
             getTorsoVertex(z1,theta,px1,py1,pz1); getTorsoNormal(z1,theta,nx1,ny1,nz1);
-            glNormal3f(nx1,ny1,nz1); glTexCoord2f(s,f1*2); glVertex3f(px1,py1,pz1);
+            if (!isShadowPass) {
+                glNormal3f(nx1,ny1,nz1); glTexCoord2f(s,f1*2); 
+            }
+            glVertex3f(px1,py1,pz1);
         }
         glEnd();
     }
@@ -1945,6 +2182,67 @@ void drawBodyMesh()
 }
 
 //================================================================
+//  SHADOWS (Planar Squish Method)
+//================================================================
+
+void drawCharacter(); // Forward declaration
+
+void drawPlanarShadow()
+{
+    glPushMatrix();
+    
+    // Lift slightly to avoid z-buffer fighting
+    glTranslatef(0.0f, 0.01f, 0.0f);
+
+    // Made the shadow longer by moving artificial light closer to original
+    float sLightX = lightX * 0.9f;
+    float sLightY = lightY * 1.4f;
+    float sLightZ = lightZ * 0.9f;
+
+    // Squish matrix for light onto y=0 plane
+    GLfloat matrix[16] = {
+        sLightY,  0.0f, 0.0f, 0.0f,           // Column 0
+        -sLightX, 0.0f, -sLightZ, -1.0f,      // Column 1
+        0.0f,     0.0f, sLightY,  0.0f,       // Column 2
+        0.0f,     0.0f, 0.0f,     sLightY     // Column 3
+    };
+
+    glMultMatrixf(matrix);
+
+    // Shadow state: Force pure black unconditionally using the lighting pipeline
+    glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_CURRENT_BIT);
+    
+    glEnable(GL_LIGHTING);
+    glDisable(GL_LIGHT0);
+    glDisable(GL_LIGHT1);
+    glDisable(GL_COLOR_MATERIAL); // Critical: Ignore all glColor3f calls inside the character meshes
+    glDisable(GL_TEXTURE_2D);
+
+    // Calculate shadow color based on isNight
+    GLfloat shadowColor[4];
+    if (isNight) {
+        shadowColor[0] = 0.01f; shadowColor[1] = 0.01f; shadowColor[2] = 0.04f; shadowColor[3] = 1.0f; 
+    } else {
+        // Slightly lighter grey for daytime
+        shadowColor[0] = 0.12f; shadowColor[1] = 0.12f; shadowColor[2] = 0.12f; shadowColor[3] = 1.0f;
+    }
+
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, shadowColor);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, shadowColor);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, shadowColor);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, shadowColor);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, shadowColor);
+
+    isShadowPass = true;
+    drawCharacter(); 
+    isShadowPass = false;
+
+    // Restore all states seamlessly
+    glPopAttrib();
+    glPopMatrix();
+}
+
+//================================================================
 //  CHARACTER assembly  (body uses Z-up so we rotate -90° on X)
 //================================================================
 
@@ -1959,35 +2257,58 @@ void drawCharacter()
     glTranslatef(charX, CHAR_Y, charZ);  // Move character in world
     glRotatef(charRotation, 0.0f, 1.0f, 0.0f); // Rotate character
 
-    // ---- Body (Z-up model, rotate so Z becomes world Y) ----
-    glPushMatrix();
-    glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-    glRotatef(180.0f, 0.0f, 0.0f, 1.0f); // Reverse body direction to face camera
-    if (cachedBodyList == 0) {
-        cachedBodyList = glGenLists(1);
-        glNewList(cachedBodyList, GL_COMPILE);
-        drawBodyMesh();
-        drawDressMesh();
-        glEndList();
+    if (isShadowPass) {
+        // SHADOW OPTIMIZATION: 
+        // Use the real limbs and body for the correct animated shape, 
+        // but completely skip the complex dress mesh to eliminate lagging.
+        
+        // ---- Body/Dress Proxy ----
+        glPushMatrix();
+        glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(180.0f, 0.0f, 0.0f, 1.0f); 
+        drawBodyMesh(); // Very fast torso and head
+        
+        // Super-fast cone to represent the dress skirt
+        GLUquadric* q = gluNewQuadric();
+        glTranslatef(0.0f, 0.0f, -0.4f);
+        gluCylinder(q, 0.3f, 0.8f, 1.0f, 12, 1);
+        gluDeleteQuadric(q);
+        glPopMatrix();
+
+        // ---- Legs ----
+        glTranslatef(0.0f, -1.53f, 0.0f);   
+        drawLeftLeg();
+        drawRightLeg();
+
+        // ---- Arms ----
+        glTranslatef(0.0f, 1.53f, 0.0f);    
+        drawLeftArm();
+        drawRightArm();
+    } else {
+        // ---- Body (Z-up model, rotate so Z becomes world Y) ----
+        glPushMatrix();
+        glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(180.0f, 0.0f, 0.0f, 1.0f); // Reverse body direction to face camera
+        if (cachedBodyList == 0) {
+            cachedBodyList = glGenLists(1);
+            glNewList(cachedBodyList, GL_COMPILE);
+            drawBodyMesh();
+            drawDressMesh();
+            glEndList();
+        }
+        glCallList(cachedBodyList);
+        glPopMatrix();
+
+        // ---- Legs (Y-up, origin at hip Y=1.53, extend downward) ----
+        glTranslatef(0.0f, -1.53f, 0.0f);   // re-origin to hip joint
+        drawLeftLeg();
+        drawRightLeg();
+
+        // ---- Arms (Y-up, origin at shoulder; shoulder ≈ body Z=1.35 above hip) ----
+        glTranslatef(0.0f, 1.53f, 0.0f);    // undo the leg offset
+        drawLeftArm();
+        drawRightArm();
     }
-    glCallList(cachedBodyList);
-    glPopMatrix();
-
-    // ---- Legs (Y-up, origin at hip Y=1.53, extend downward) ----
-    // Hip is at body Z=0 → world Y=0 inside the group → subtract 1.53 to
-    // shift the leg origin to hip level (world Y = CHAR_Y - 1.53... but
-    // the legs' drawLeftLeg() already "assumes" their origin is at y=1.53
-    // above the floor, so we just call them directly; the CHAR_Y lift handles it).
-    glTranslatef(0.0f, -1.53f, 0.0f);   // re-origin to hip joint
-    drawLeftLeg();
-    drawRightLeg();
-
-    // ---- Arms (Y-up, origin at shoulder; shoulder ≈ body Z=1.35 above hip) ----
-    // Inside the group (after CHAR_Y lift), shoulder world-Y = 0 + 1.35.
-    // drawLeftArm/drawRightArm() use glTranslatef(±0.50, 1.35, 0) internally.
-    glTranslatef(0.0f, 1.53f, 0.0f);    // undo the leg offset
-    drawLeftArm();
-    drawRightArm();
 
     glPopMatrix();
 }
@@ -2009,12 +2330,24 @@ void display()
     glLoadIdentity();
 
     updateCamera();
-    gluLookAt(cameraX + charX, cameraY, cameraZ + charZ,
-              charX, 1.2, charZ,   // look at character chest height
+    
+    float shakeX = 0, shakeY = 0, shakeZ = 0;
+    if (screenShakeTimer > 0.0f) {
+        shakeX = ((rand() % 100) / 50.0f - 1.0f) * 0.15f;
+        shakeY = ((rand() % 100) / 50.0f - 1.0f) * 0.15f;
+        shakeZ = ((rand() % 100) / 50.0f - 1.0f) * 0.15f;
+    }
+
+    gluLookAt(cameraX + charX + shakeX, cameraY + shakeY, cameraZ + charZ + shakeZ,
+              charX + shakeX, 1.2 + shakeY, charZ + shakeZ,   // look at character chest height
               0, 1, 0);
 
+    // Save camera orientation for world-aligned weapons
+    glGetFloatv(GL_MODELVIEW_MATRIX, cameraViewMatrix);
+
     drawBackground();
-    drawCharacter();
+    drawPlanarShadow(); // Draw shadow pass
+    drawCharacter();    // Draw main character pass
 }
 
 //================================================================
