@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <algorithm>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
 
 using std::max;
 
@@ -23,6 +27,7 @@ float cameraDistance = 3.8f;
 float cameraX, cameraY, cameraZ;
 
 GLuint texSkin;
+GLuint texHeadObj;
 
 GLuint loadBMP(const char* filename) {
 	FILE* file = fopen(filename, "rb");
@@ -121,6 +126,7 @@ void initOpenGL() {
 // Math helpers (from head3.cpp)
 // ----------------------------------------------------------------
 struct Vec3 { float x, y, z; };
+struct Vec2 { float u, v; };
 
 Vec3 v3(float x, float y, float z) { Vec3 v = { x, y, z }; return v; }
 Vec3 v3add(Vec3 a, Vec3 b) { return v3(a.x + b.x, a.y + b.y, a.z + b.z); }
@@ -200,9 +206,9 @@ void setupLightingHead() {
     glLightfv(GL_LIGHT2, GL_DIFFUSE, lightDiff2);
     
     // Advanced material properties
-    GLfloat specColor[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+    GLfloat specColor[] = { 0.15f, 0.15f, 0.15f, 1.0f }; // Softer specular reflection
     glMaterialfv(GL_FRONT, GL_SPECULAR, specColor);
-    glMateriali(GL_FRONT, GL_SHININESS, 64); // Sharper highlights
+    glMateriali(GL_FRONT, GL_SHININESS, 16); // Soft skin, less plastic
 }
 
 void setupLightingHair() {
@@ -251,18 +257,19 @@ struct CrossSection {
     float yOffset;
 };
 
-#define SEC_COUNT 10
+#define SEC_COUNT 11
 CrossSection sections[SEC_COUNT] = {
-    {-0.15f, 0.10f, 0.09f,  0.00f},  // neck top (slightly thicker)
-    { 0.00f, 0.14f, 0.11f,  0.02f},  // jaw base (smoother transition)
-    { 0.15f, 0.28f, 0.26f,  0.08f},  // lower jaw
-    { 0.35f, 0.38f, 0.34f,  0.10f},  // cheeks
-    { 0.52f, 0.40f, 0.38f,  0.08f},  // eye level
-    { 0.68f, 0.38f, 0.37f,  0.05f},  // temples
-    { 0.82f, 0.35f, 0.35f,  0.02f},  // forehead
-    { 0.92f, 0.28f, 0.30f,  0.01f},  // crown start
-    { 0.98f, 0.12f, 0.15f,  0.00f},  // top curve
-    { 1.05f, 0.00f, 0.00f,  0.00f}   // spline end
+    {-0.12f, 0.05f, 0.05f,  0.08f},  // dummy
+    { 0.00f, 0.08f, 0.10f,  0.08f},  // chin base (slightly wider)
+    { 0.15f, 0.24f, 0.23f,  0.06f},  // lower jaw
+    { 0.30f, 0.38f, 0.37f,  0.03f},  // jaw angle / cheeks
+    { 0.45f, 0.46f, 0.46f,  0.01f},  // eye level (widest)
+    { 0.55f, 0.45f, 0.45f,  0.00f},  // upper face
+    { 0.65f, 0.41f, 0.41f,  0.00f},  // forehead
+    { 0.75f, 0.34f, 0.34f,  0.00f},  // upper head
+    { 0.83f, 0.25f, 0.25f,  0.00f},  // top curve
+    { 0.88f, 0.13f, 0.13f,  0.00f},  // near top
+    { 0.90f, 0.000f, 0.000f, 0.00f}  // top end
 };
 
 void getHeadBaseRadius(float z, float &rx, float &ry, float &yOfs) {
@@ -302,29 +309,30 @@ void getHeadVertex(float z, float theta, float &px, float &py, float &pz) {
     float frontSide = sinf(theta);
     float sideFactor = fabsf(cosf(theta));
 
-    if (z < 0.5f && frontSide > 0.0f) {
-        float jawDepth = (0.5f - z) / 0.8f;
-        float pinch = jawDepth * (1.0f - fabsf(theta - 3.14159f*0.5f) / (3.14159f*0.5f));
-        rx *= (1.0f - 0.22f * pinch);
-        ry *= (1.0f - 0.08f * pinch);
+    if (z < 0.45f) {
+        float faceFade = (0.45f - z) / 0.45f;
+        // Jaw narrowing - softer than original but still anime V-shape
+        float frontSharp = faceFade * 0.25f * expf(-powf(theta - 3.14159f*0.5f, 2.0f) / 0.30f);
+        rx *= (1.0f - frontSharp);
     }
 
     if (frontSide < 0.0f) {
         float backFactor = -frontSide;
         float zHeight = (z - sections[0].z) / (sections[SEC_COUNT-1].z - sections[0].z);
-        float expand = 0.12f * backFactor * expf(-powf(zHeight - 0.6f, 2.0f) / 0.1f);
+        // Cranium expansion for rounder back-of-head
+        float expand = 0.14f * backFactor * expf(-powf(zHeight - 0.6f, 2.0f) / 0.11f);
         rx += expand;
         ry += expand;
     }
 
     if (theta > 0.0f && theta < 3.14159f) {
         float noseBridgeZ = 0.38f;
-        float noseBridge = 0.035f * expf(-(powf(z - noseBridgeZ, 2.0f) / 0.010f + powf(theta - 3.14159f*0.5f, 2.0f) / 0.006f));
+        float noseBridge = 0.020f * expf(-(powf(z - noseBridgeZ, 2.0f) / 0.010f + powf(theta - 3.14159f*0.5f, 2.0f) / 0.006f));
         float noseTipZ = 0.32f;
-        float noseTip = 0.050f * expf(-(powf(z - noseTipZ, 2.0f) / 0.002f + powf(theta - 3.14159f*0.5f, 2.0f) / 0.010f));
+        float noseTip = 0.035f * expf(-(powf(z - noseTipZ, 2.0f) / 0.002f + powf(theta - 3.14159f*0.5f, 2.0f) / 0.010f));
         bump += noseBridge + noseTip;
 
-        float eyeZ = 0.48f;
+        float eyeZ = 0.39f;
         float eyeIndent = -0.085f * expf(-(powf(z - eyeZ, 2.0f) / 0.024f + powf(theta - 3.14159f*0.35f, 2.0f) / 0.038f));
         eyeIndent += -0.085f * expf(-(powf(z - eyeZ, 2.0f) / 0.024f + powf(theta - 3.14159f*0.65f, 2.0f) / 0.038f));
         
@@ -353,7 +361,7 @@ void getHeadVertex(float z, float theta, float &px, float &py, float &pz) {
         float nostrilR = -0.008f * expf(-(powf(z - nostrilZ, 2.0f) / 0.001f + powf(theta - (3.14159f*0.5f - 0.04f), 2.0f) / 0.006f));
         bump += nostrilL + nostrilR;
         
-        float creaseZ = 0.54f;
+        float creaseZ = 0.43f;
         float creaseBump = 0.006f * expf(-(powf(z - creaseZ, 2.0f) / 0.0005f + powf(theta - 3.14159f*0.5f, 2.0f) / 0.15f));
         bump += creaseBump;
 
@@ -398,11 +406,82 @@ void getHeadNormal(float z, float theta, float &nx, float &ny, float &nz) {
     if(len > 0) { nx /= len; ny /= len; nz /= len; }
 }
 
+void bindOBJToDisplayList(const char* filename, GLuint& displayList) {
+    std::vector<Vec3> temp_vertices;
+    std::vector<Vec2> temp_uvs;
+    std::vector<Vec3> temp_normals;
+    
+    std::ifstream in(filename, std::ios::in);
+    if (!in) {
+        printf("Cannot open %s\n", filename);
+        return;
+    }
+    
+    displayList = glGenLists(1);
+    glNewList(displayList, GL_COMPILE);
+    
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.length() < 2) continue;
+        if (line[0] == 'v' && line[1] == ' ') {
+            std::istringstream s(line.substr(2));
+            Vec3 v; s >> v.x >> v.y >> v.z;
+            temp_vertices.push_back(v);
+        } else if (line[0] == 'v' && line[1] == 't' && line[2] == ' ') {
+            std::istringstream s(line.substr(3));
+            Vec2 uv; s >> uv.u >> uv.v;
+            temp_uvs.push_back(uv);
+        } else if (line[0] == 'v' && line[1] == 'n' && line[2] == ' ') {
+            std::istringstream s(line.substr(3));
+            Vec3 n; s >> n.x >> n.y >> n.z;
+            temp_normals.push_back(n);
+        } else if (line[0] == 'f' && line[1] == ' ') {
+            std::istringstream s(line.substr(2));
+            std::string token;
+            std::vector<int> vIdx, uvIdx, nIdx;
+            while (s >> token) {
+                int v=0, vt=0, vn=0;
+                if (sscanf(token.c_str(), "%d/%d/%d", &v, &vt, &vn) == 3) {
+                    vIdx.push_back(v); uvIdx.push_back(vt); nIdx.push_back(vn);
+                } else if (sscanf(token.c_str(), "%d//%d", &v, &vn) == 2) {
+                    vIdx.push_back(v); nIdx.push_back(vn);
+                } else if (sscanf(token.c_str(), "%d/%d", &v, &vt) == 2) {
+                    vIdx.push_back(v); uvIdx.push_back(vt);
+                } else if (sscanf(token.c_str(), "%d", &v) == 1) {
+                    vIdx.push_back(v);
+                }
+            }
+            
+            if (vIdx.size() == 3) glBegin(GL_TRIANGLES);
+            else if (vIdx.size() == 4) glBegin(GL_QUADS);
+            else glBegin(GL_POLYGON);
+            
+            for (size_t i = 0; i < vIdx.size(); ++i) {
+                if (i < nIdx.size() && nIdx[i] > 0 && (nIdx[i]-1) < temp_normals.size()) {
+                    Vec3& n = temp_normals[nIdx[i]-1];
+                    glNormal3f(n.x, n.y, n.z);
+                }
+                if (i < uvIdx.size() && uvIdx[i] > 0 && (uvIdx[i]-1) < temp_uvs.size()) {
+                    Vec2& uv = temp_uvs[uvIdx[i]-1];
+                    // v coordinate inversion is sometimes necessary for obj
+                    glTexCoord2f(uv.u, uv.v); 
+                }
+                if (i < vIdx.size() && vIdx[i] > 0 && (vIdx[i]-1) < temp_vertices.size()) {
+                    Vec3& v = temp_vertices[vIdx[i]-1];
+                    glVertex3f(v.x, v.y, v.z);
+                }
+            }
+            glEnd();
+        }
+    }
+    glEndList();
+}
+
 void drawHeadMesh() {
     int stacks = 128;
     int slices = 128;
     
-    float zMin = sections[0].z;
+    float zMin = sections[1].z;
     float zMax = sections[SEC_COUNT-2].z;
     
     glColor3f(1.0f, 1.0f, 1.0f);
@@ -427,6 +506,10 @@ void drawHeadMesh() {
             
             glNormal3f(nx2, ny2, nz2);
             glTexCoord2f(s, f2 * 2.0f);
+            float blush2L = expf(-(powf(z2 - 0.25f, 2.0f)/0.005f + powf(theta - 1.0f, 2.0f)/0.05f));
+            float blush2R = expf(-(powf(z2 - 0.25f, 2.0f)/0.005f + powf(theta - (3.14159f - 1.0f), 2.0f)/0.05f));
+            float b2 = clampf(blush2L + blush2R, 0.0f, 1.0f);
+            glColor3f(1.0f, 1.0f - 0.35f * b2, 1.0f - 0.35f * b2);
             glVertex3f(px2, py2, pz2);
             
             float px1, py1, pz1;
@@ -436,11 +519,16 @@ void drawHeadMesh() {
             
             glNormal3f(nx1, ny1, nz1);
             glTexCoord2f(s, f1 * 2.0f);
+            float blush1L = expf(-(powf(z1 - 0.25f, 2.0f)/0.005f + powf(theta - 1.0f, 2.0f)/0.05f));
+            float blush1R = expf(-(powf(z1 - 0.25f, 2.0f)/0.005f + powf(theta - (3.14159f - 1.0f), 2.0f)/0.05f));
+            float b1 = clampf(blush1L + blush1R, 0.0f, 1.0f);
+            glColor3f(1.0f, 1.0f - 0.35f * b1, 1.0f - 0.35f * b1);
             glVertex3f(px1, py1, pz1);
         }
         glEnd();
     }
     
+    glColor3f(1.0f, 1.0f, 1.0f);
     glBegin(GL_POLYGON);
     glNormal3f(0.0f, 0.0f, 1.0f);
     for(int j = 0; j <= slices; j++) {
@@ -452,6 +540,7 @@ void drawHeadMesh() {
     }
     glEnd();
     
+    glColor3f(1.0f, 1.0f, 1.0f);
     glBegin(GL_POLYGON);
     glNormal3f(0.0f, 0.0f, -1.0f);
     for(int j = slices; j >= 0; j--) {
@@ -466,7 +555,7 @@ void drawHeadMesh() {
 
 void drawEyes() {
     float rx, ry, yOfs;
-    float eyeZ = 0.52f; 
+    float eyeZ = 0.40f; 
     getHeadBaseRadius(eyeZ, rx, ry, yOfs);
     
     glDisable(GL_TEXTURE_2D);
@@ -481,7 +570,7 @@ void drawEyes() {
         glTranslatef(ex, ey * 0.95f, eyeZ); 
         glRotatef(thetaBase * 180.0f / 3.14159f - 90.0f, 0, 0, 1);
         
-        glColor3f(0.06f, 0.05f, 0.08f);
+        glColor3f(0.95f, 0.95f, 0.98f);
         glBegin(GL_TRIANGLE_STRIP);
         for(int j=0; j<=20; j++) {
             float a = (j/20.0f) * 3.14159f;
@@ -506,17 +595,27 @@ void drawEyes() {
         float w = 0.078f;
         float h = 0.042f;
         glBegin(GL_TRIANGLE_FAN);
-        glColor3f(0.05f, 0.0f, 0.15f);
+        glColor3f(0.05f, 0.0f, 0.20f); // core pupil base
         glVertex3f(0, 0.010f, 0); 
         for (int j = 0; j <= 40; j++) {
             float a = j * 2.0f * 3.14159f / 40.0f;
             float vx = w * cosf(a);
             float vz = h * sinf(a);
             float dist = sqrtf(vx*vx + vz*vz) / h;
-            if (dist < 0.3f) glColor3f(0.15f, 0.35f, 0.9f);
-            else if (dist < 0.7f) glColor3f(0.45f, 0.15f, 0.85f);
-            else if (dist < 0.9f) glColor3f(0.2f, 0.02f, 0.4f);
-            else glColor3f(0.5f, 0.4f, 1.0f);
+            float yGrad = (vz / h); // goes from -1 to 1
+            if (dist < 0.25f) {
+                glColor3f(0.1f, 0.05f, 0.25f); // core dark
+            } else {
+                // Lower is bright pink/purple, upper is dark navy
+                float bR = 0.5f - 0.4f * yGrad;
+                float bG = 0.2f - 0.2f * yGrad;
+                float bB = 0.8f - 0.5f * yGrad;
+                
+                if (dist > 0.82f) { // Outer iris rim darker
+                    bR *= 0.4f; bG *= 0.4f; bB *= 0.4f;
+                }
+                glColor3f(bR, bG, bB);
+            }
             glVertex3f(vx, 0.010f, vz);
         }
         glEnd();
@@ -551,19 +650,58 @@ void drawEyes() {
         }
         glEnd();
         
-        float glints[2][2] = {{0.030f, -0.015f}, {-0.012f, -0.035f}};
-        for(int g=0; g<2; g++){
+        float glints[3][3] = {
+            {0.022f, -0.012f, 0.015f},  // x, z, radius (main glint)
+            {-0.025f, 0.010f, 0.008f},  // side highlight
+            {0.010f, -0.028f, 0.006f}   // bottom tiny accent
+        };
+        for(int g=0; g<3; g++){
             glBegin(GL_TRIANGLE_FAN);
+            glColor3f(1.0f, 1.0f, 1.0f);
             glVertex3f(glints[g][0], 0.014f, glints[g][1]);
-            for(int j=0; j<=8; j++){
-                float a = j * 2.0f * 3.14159f / 8.0f;
-                glVertex3f(glints[g][0]+0.004f*cosf(a), 0.014f, glints[g][1]+0.004f*sinf(a));
+            for(int j=0; j<=16; j++){
+                float a = j * 2.0f * 3.14159f / 16.0f;
+                float r = glints[g][2];
+                glVertex3f(glints[g][0]+r*cosf(a), 0.014f, glints[g][1]+r*sinf(a));
             }
             glEnd();
         }
 
+        // Add eyelashes and eyeliner
         glPushMatrix();
-        glTranslatef(0.0f, 0.0f, 0.13f); 
+        glColor3f(0.05f, 0.02f, 0.06f); // dark purplish black for lashes
+        // Sweeping Lash spikes
+        glBegin(GL_TRIANGLES);
+        for(int l=0; l<7; l++) {
+            float f = (float)l/6.0f; // 0 to 1
+            float startA = (0.15f + 0.85f * f) * 3.14159f;
+            float bx = 0.10f * cosf(startA);
+            float bz = 0.055f * sinf(startA);
+            
+            float lashLen = 0.035f + 0.040f * powf(1.0f - f, 2.0f); // Longer at outer edge (f near 0)
+            float lashSweep = 0.045f * (1.0f - f); // Sweeps outwards
+            
+            glVertex3f(bx, 0.015f, bz);
+            glVertex3f(bx + 0.008f, 0.015f, bz - 0.004f);
+            glVertex3f(bx + lashSweep, 0.020f, bz + lashLen);
+        }
+        glEnd();
+        
+        // Eyeliner thick band
+        glBegin(GL_QUAD_STRIP);
+        for(int j=0; j<=20; j++) {
+            float a = (j/20.0f) * 3.14159f;
+            float vx = 0.10f * cosf(a);
+            float vz = 0.055f * sinf(a);
+            float thick = 0.006f + 0.014f * powf(1.0f - (float)j/20.0f, 2.0f); // Thicker line on outer edge
+            glVertex3f(vx * 0.98f, 0.012f, vz * 0.98f);
+            glVertex3f(vx * 1.15f, 0.014f, vz + thick);
+        }
+        glEnd();
+        glPopMatrix();
+
+        glPushMatrix();
+        glTranslatef(0.0f, 0.0f, 0.10f); 
         glRotatef(i == 0 ? -5.0f : 5.0f, 0, 1, 0); 
         glColor3f(0.04f, 0.04f, 0.05f);
         int bSteps = 16;
@@ -592,12 +730,12 @@ void drawLips() {
     glDisable(GL_LIGHTING);
     glColor3f(0.01f, 0.01f, 0.02f);
     int sSteps = 48;
-    float slitWidth = 0.28f;
+    float slitWidth = 0.16f; // Smaller mouth
     glBegin(GL_QUAD_STRIP);
     for(int j=0; j<=sSteps; j++) {
         float f = (float)j/sSteps;
         float theta = 3.14159f * 0.5f + (-1.0f + 2.0f * f) * slitWidth;
-        float z = 0.198f + 0.008f * powf(fabsf(-1.0f + 2.0f * f), 2.0f); 
+        float z = 0.198f + 0.015f * powf(fabsf(-1.0f + 2.0f * f), 2.0f); // More pronounced smile curve
         float px, py, pz, nx, ny, nz;
         getHeadVertex(z, theta, px, py, pz);
         getHeadNormal(z, theta, nx, ny, nz);
@@ -614,8 +752,8 @@ void drawLips() {
 
     struct LipPart { float zCenter, zHalf, tMax; bool isUpper; };
     LipPart parts[2] = {
-        {0.208f, 0.010f, 0.22f, true},
-        {0.192f, 0.006f, 0.19f, false}
+        {0.208f, 0.010f, 0.14f, true},
+        {0.192f, 0.006f, 0.12f, false}
     };
 
     for (int p = 0; p < 2; p++) {
@@ -629,6 +767,12 @@ void drawLips() {
                 float factor = sqrtf(max(0.0f, 1.0f - powf(fTheta, 2.0f)));
                 float zBot = parts[p].zCenter - parts[p].zHalf * factor;
                 float zTop = parts[p].zCenter + parts[p].zHalf * factor;
+                
+                // Add smile curve to lips
+                float smileCurve = 0.015f * powf(fTheta, 2.0f);
+                zBot += smileCurve;
+                zTop += smileCurve;
+                
                 if (parts[p].isUpper) {
                     float bowDip = 0.005f * expf(-powf(theta - 3.14159f*0.5f, 2.0f)/0.0015f);
                     zTop -= bowDip;
@@ -661,8 +805,8 @@ void drawLips() {
 // ----------------------------------------------------------------
 const float SR_X = 0.48f;
 const float SR_Y = 0.50f;
-const float SR_Z = 0.56f;
-const float SC_Z = 0.42f;
+const float SR_Z = 0.48f;
+const float SC_Z = 0.38f;
 
 Vec3 skullPt(float theta, float phi) {
     return v3(SR_X * sinf(phi) * cosf(theta),
@@ -693,16 +837,16 @@ void emitT(Vec3 p0, Vec3 n0, Vec3 p1, Vec3 n1, Vec3 p2, Vec3 n2) {
 }
 
 void setHairColor(float shade, float tint) {
-    float r = (0.05f + 0.15f * tint) * shade;
-    float g = (0.22f + 0.22f * tint) * shade;
-    float b = (0.62f + 0.22f * tint) * shade;
+    float r = (0.10f + 0.10f * tint) * shade;
+    float g = (0.35f + 0.20f * tint) * shade;
+    float b = (0.85f + 0.15f * tint) * shade;
     glColor3f(r, g, b);
 }
 
 void setHairColorBright(float shade, float tint) {
-    float r = (0.18f + 0.25f * tint) * shade;
-    float g = (0.42f + 0.20f * tint) * shade;
-    float b = (0.80f + 0.15f * tint) * shade;
+    float r = (0.25f + 0.15f * tint) * shade;
+    float g = (0.55f + 0.20f * tint) * shade;
+    float b = (1.0f  + 0.0f  * tint) * shade;
     glColor3f(r, g, b);
 }
 
@@ -724,6 +868,8 @@ struct HairPanel {
     float colorTint;
     float colorShade;
     int bright;
+    float thetaSweep;
+    HairPanel() { thetaSweep = 0.0f; }
 };
 
 void drawPanel(const HairPanel& hp) {
@@ -758,6 +904,7 @@ void drawPanel(const HairPanel& hp) {
             float theta = hp.thetaStart + (hp.thetaEnd - hp.thetaStart) * u;
             float centerTheta = (hp.thetaStart + hp.thetaEnd) * 0.5f;
             theta = centerTheta + (theta - centerTheta) * wMul;
+            theta += hp.thetaSweep * v * v; // Dynamic sweep outwards over length
 
             float phi = hp.phiStart + hp.phiConform * clampf(v * 1.5f, 0, 1);
 
@@ -807,7 +954,7 @@ void drawPanel(const HairPanel& hp) {
             Vec3 fn10 = v3scale(nrm[i10], -1);
             Vec3 fn11 = v3scale(nrm[i11], -1);
             Vec3 fn01 = v3scale(nrm[i01], -1);
-            float bshade = shade * 0.65f;
+            float bshade = shade * 0.40f;
             if (hp.bright) setHairColorBright(bshade, hp.colorTint);
             else setHairColor(bshade, hp.colorTint);
             emitQ(pts[i01], fn01, pts[i11], fn11, pts[i10], fn10, pts[i00], fn00);
@@ -845,12 +992,12 @@ void drawBackHair() {
         hp.numRings = 8;
         hp.rings[0] = { 0.04f + depthVar, 0.0f,    1.0f,  0.02f };
         hp.rings[1] = { 0.05f + depthVar, -0.05f,   1.0f,  0.04f };
-        hp.rings[2] = { 0.06f + depthVar, -0.18f,   0.95f, 0.05f };
-        hp.rings[3] = { 0.08f + depthVar, -0.38f,   0.88f, 0.04f };
-        hp.rings[4] = { 0.10f + depthVar, -0.60f,   0.78f, 0.03f };
-        hp.rings[5] = { 0.10f + depthVar, -0.85f,   0.65f, 0.02f };
-        hp.rings[6] = { 0.08f + depthVar, -totalDrop * 0.88f, 0.40f, 0.01f };
-        hp.rings[7] = { 0.05f + depthVar, -totalDrop + 0.08f, 0.20f, 0.00f };
+        hp.rings[2] = { 0.08f + depthVar, -0.18f,   0.95f, 0.05f };
+        hp.rings[3] = { 0.05f + depthVar, -0.38f,   0.88f, 0.04f };
+        hp.rings[4] = { 0.12f + depthVar, -0.60f,   0.78f, 0.03f };
+        hp.rings[5] = { 0.06f + depthVar, -0.85f,   0.65f, 0.02f };
+        hp.rings[6] = { 0.12f + depthVar, -totalDrop * 0.88f, 0.40f, 0.01f };
+        hp.rings[7] = { 0.02f + depthVar, -totalDrop + 0.08f, 0.20f, 0.00f };
 
         drawPanel(hp);
     }
@@ -862,9 +1009,9 @@ void drawSideHair() {
         const int numPanels = 8;
         for (int i = 0; i < numPanels; ++i) {
             float baseAngle = (side == 0) ? (PI * 0.0f) : (PI * 1.0f);
-            float spread = PI * 0.55f * ((float)i / (numPanels - 1) - 0.5f);
+            float spread = PI * 0.40f * ((float)i / (numPanels - 1) - 0.5f);
             float centerAngle = baseAngle + spread;
-            float halfWidth = PI / (float)(numPanels) * 1.2f;
+            float halfWidth = PI / (float)(numPanels) * 0.8f;
 
             HairPanel hp;
             hp.thetaStart = centerAngle - halfWidth;
@@ -882,12 +1029,12 @@ void drawSideHair() {
 
             hp.numRings = 7;
             hp.rings[0] = { 0.04f + dv, 0.0f,   1.0f,  0.03f };
-            hp.rings[1] = { 0.05f + dv, -0.06f,  1.0f,  0.05f };
-            hp.rings[2] = { 0.07f + dv, -0.22f,  0.92f, 0.04f };
-            hp.rings[3] = { 0.09f + dv, -0.45f,  0.82f, 0.03f };
-            hp.rings[4] = { 0.09f + dv, -0.72f,  0.68f, 0.02f };
-            hp.rings[5] = { 0.07f + dv, -totalDrop * 0.85f, 0.42f, 0.01f };
-            hp.rings[6] = { 0.04f + dv, -totalDrop,         0.18f, 0.00f };
+            hp.rings[1] = { 0.06f + dv, -0.06f,  1.0f,  0.05f };
+            hp.rings[2] = { 0.10f + dv, -0.22f,  0.92f, 0.04f };
+            hp.rings[3] = { 0.05f + dv, -0.45f,  0.82f, 0.03f };
+            hp.rings[4] = { 0.12f + dv, -0.72f,  0.68f, 0.02f };
+            hp.rings[5] = { 0.05f + dv, -totalDrop * 0.85f, 0.42f, 0.01f };
+            hp.rings[6] = { 0.10f + dv, -totalDrop,         0.18f, 0.00f };
 
             drawPanel(hp);
         }
@@ -895,58 +1042,97 @@ void drawSideHair() {
 }
 
 void drawBangs() {
-    const int numLeft = 4;
-    for (int i = 0; i < numLeft; ++i) {
-        float t = (float)i / (numLeft - 1);
-        float centerAngle = PI * 0.5f + PI * 0.10f * (t - 0.5f) - PI * 0.06f;
-        float halfWidth = PI * 0.06f + PI * 0.02f * t;
+    // 1. Middle V-shape bangs (covers forehead)
+    const int numMid = 8;
+    for (int i = 0; i < numMid; ++i) {
+        float t = (float)i / (numMid - 1); 
+        float centerAngle = PI * 0.5f + PI * 0.14f * (t - 0.5f); // Spread across forehead
+        float halfWidth = PI * 0.04f; 
 
         HairPanel hp;
         hp.thetaStart = centerAngle - halfWidth;
         hp.thetaEnd = centerAngle + halfWidth;
-        hp.phiStart = PI * 0.02f + rr(i * 83, 0, 0.02f);
-        hp.phiConform = PI * 0.22f + rr(i * 89, -0.02f, 0.02f);
-        hp.widthSegs = 3;
-        hp.lengthSegs = 6;
-        hp.colorTint = rr(i * 97, 0.1f, 0.6f);
+        hp.phiStart = PI * 0.01f + rr(i * 83, 0, 0.01f);
+        hp.phiConform = PI * 0.22f + rr(i * 89, -0.01f, 0.01f);
+        hp.widthSegs = 4;
+        hp.lengthSegs = 10;
+        hp.colorTint = rr(i * 97, 0.2f, 0.6f);
         hp.colorShade = 0.85f + rr(i * 101, 0, 0.10f);
         hp.bright = 0;
+        hp.thetaSweep = 0.0f; // Straight down, no side-sweep
 
-        float bangLen = 0.18f + 0.12f * t + rr(i * 103, -0.04f, 0.05f);
+        // V-shape: center strands (t~0.5) are LONGEST, edges are shorter
+        float distFromCenter = fabsf(t - 0.5f) * 2.0f;
+        float bangLen = 0.45f - 0.15f * distFromCenter; // Center: 0.45, Edges: 0.30
 
-        hp.numRings = 4;
+        hp.numRings = 5;
         hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f };
         hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
-        hp.rings[2] = { 0.08f, -bangLen * 0.6f,  0.75f, 0.02f };
-        hp.rings[3] = { 0.05f, -bangLen,          0.30f, 0.00f };
+        hp.rings[2] = { 0.09f, -bangLen * 0.4f,  0.90f, 0.02f };
+        hp.rings[3] = { 0.07f, -bangLen * 0.75f,  0.55f, 0.01f };
+        hp.rings[4] = { 0.03f, -bangLen,          0.15f, 0.00f }; 
 
         drawPanel(hp);
     }
 
-    const int numRight = 4;
-    for (int i = 0; i < numRight; ++i) {
-        float t = (float)i / (numRight - 1);
-        float centerAngle = PI * 0.5f + PI * 0.10f * (t - 0.5f) + PI * 0.06f;
-        float halfWidth = PI * 0.06f + PI * 0.02f * t;
+    // 2. Left Bangs (Sweeping Outwards)
+    const int numLeft = 4;
+    for (int i = 0; i < numLeft; ++i) {
+        float t = (float)i / (numLeft - 1);
+        float centerAngle = PI * 0.5f - PI * 0.08f - PI * 0.14f * t; 
+        float halfWidth = PI * 0.06f; 
 
         HairPanel hp;
         hp.thetaStart = centerAngle - halfWidth;
         hp.thetaEnd = centerAngle + halfWidth;
-        hp.phiStart = PI * 0.02f + rr(i * 107, 0, 0.02f);
-        hp.phiConform = PI * 0.22f + rr(i * 109, -0.02f, 0.02f);
-        hp.widthSegs = 3;
-        hp.lengthSegs = 6;
-        hp.colorTint = rr(i * 113 + 1000, 0.1f, 0.6f);
-        hp.colorShade = 0.85f + rr(i * 127 + 1000, 0, 0.10f);
+        hp.phiStart = PI * 0.02f + rr(i * 103, 0, 0.02f);
+        hp.phiConform = PI * 0.20f; 
+        hp.widthSegs = 4;
+        hp.lengthSegs = 10;
+        hp.colorTint = rr(i * 113, 0.1f, 0.6f);
+        hp.colorShade = 0.85f + rr(i * 127, 0, 0.10f);
         hp.bright = 0;
+        
+        hp.thetaSweep = -0.45f - 0.25f * t; 
 
-        float bangLen = 0.18f + 0.12f * t + rr(i * 131, -0.04f, 0.05f);
-
-        hp.numRings = 4;
+        float bangLen = 0.15f + 0.10f * t; // Reduced length significantly        
+        hp.numRings = 5;
         hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f };
         hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
-        hp.rings[2] = { 0.08f, -bangLen * 0.6f,  0.75f, 0.02f };
-        hp.rings[3] = { 0.05f, -bangLen,          0.30f, 0.00f };
+        hp.rings[2] = { 0.10f, -bangLen * 0.4f,  0.90f, 0.02f };
+        hp.rings[3] = { 0.08f, -bangLen * 0.8f,  0.70f, 0.01f };
+        hp.rings[4] = { 0.04f, -bangLen,          0.20f, 0.00f };
+
+        drawPanel(hp);
+    }
+
+    // 3. Right Bangs (Sweeping Outwards)
+    const int numRight = 4;
+    for (int i = 0; i < numRight; ++i) {
+        float t = (float)i / (numRight - 1);
+        float centerAngle = PI * 0.5f + PI * 0.08f + PI * 0.14f * t; 
+        float halfWidth = PI * 0.06f; 
+
+        HairPanel hp;
+        hp.thetaStart = centerAngle - halfWidth;
+        hp.thetaEnd = centerAngle + halfWidth;
+        hp.phiStart = PI * 0.02f + rr(i * 131, 0, 0.02f);
+        hp.phiConform = PI * 0.20f; 
+        hp.widthSegs = 4;
+        hp.lengthSegs = 10;
+        hp.colorTint = rr(i * 139, 0.1f, 0.6f);
+        hp.colorShade = 0.85f + rr(i * 149, 0, 0.10f);
+        hp.bright = 0;
+        
+        hp.thetaSweep = 0.45f + 0.25f * t;
+
+        float bangLen = 0.15f + 0.10f * t; // Reduced length significantly
+        hp.numRings = 5;
+        hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f };
+        hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
+        hp.rings[2] = { 0.10f, -bangLen * 0.4f,  0.90f, 0.02f };
+        hp.rings[3] = { 0.08f, -bangLen * 0.8f,  0.70f, 0.01f };
+        hp.rings[4] = { 0.04f, -bangLen,          0.20f, 0.00f };
 
         drawPanel(hp);
     }
@@ -1044,7 +1230,7 @@ void drawInnerShell() {
 
 void drawSideFringe() {
     for (int side = 0; side < 2; ++side) {
-        float baseAngle = (side == 0) ? (PI * 0.22f) : (PI * 0.78f);
+        float baseAngle = (side == 0) ? (PI * 0.12f) : (PI * 0.88f); // Pushed further back from the face
         const int numPanels = 4;
 
         for (int i = 0; i < numPanels; ++i) {
@@ -1112,11 +1298,121 @@ void drawLayerStrands() {
     }
 }
 
+void drawRabbitEars() {
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        // Position ears on the top-sides of the head
+        glTranslatef(side * 0.14f, 0.04f, 0.88f);
+        glRotatef(side * 18.0f, 0, 1, 0); // Tilt outwards
+        glRotatef(-8.0f, 1, 0, 0);        // Tilt slightly back
+
+        const int stacks = 50;
+        const int slices = 36;
+        float height = 0.70f;  // Shorter rabbit ears
+        
+        for (int i = 0; i < stacks; i++) {
+            float f1 = (float)i / stacks;
+            float f2 = (float)(i + 1) / stacks;
+            
+            float z1 = f1 * height;
+            float z2 = f2 * height;
+            
+            // Custom width profile:
+            // NARROW at base, WIDEST at ~60% height, then smooth rounded U at the top
+            float peakPos = 0.60f;
+            float maxWidth = 0.15f;
+            float earWidth1, earWidth2;
+            
+            if (f1 < peakPos) {
+                // Base to peak: gradual expansion (narrow base, wider top)
+                float t = f1 / peakPos;
+                earWidth1 = maxWidth * (0.35f + 0.65f * powf(t, 0.7f));
+            } else {
+                // Peak to tip: gentle round-off for U-shape
+                float t = (f1 - peakPos) / (1.0f - peakPos);
+                earWidth1 = maxWidth * (0.30f + 0.70f * cosf(t * 3.14159f * 0.5f));
+            }
+            
+            if (f2 < peakPos) {
+                float t = f2 / peakPos;
+                earWidth2 = maxWidth * (0.35f + 0.65f * powf(t, 0.7f));
+            } else {
+                float t = (f2 - peakPos) / (1.0f - peakPos);
+                earWidth2 = maxWidth * (0.30f + 0.70f * cosf(t * 3.14159f * 0.5f));
+            }
+            
+            // Gentle backward curve
+            float curve1 = 0.12f * f1 * f1;
+            float curve2 = 0.12f * f2 * f2;
+
+            // Thickness profile
+            float thick1 = 0.035f * sinf(f1 * 3.14159f * 0.85f + 0.15f);
+            float thick2 = 0.035f * sinf(f2 * 3.14159f * 0.85f + 0.15f);
+
+            if (i == stacks - 1) {
+                // Rounded dome cap (inverted U) instead of a sharp point
+                glBegin(GL_TRIANGLE_FAN);
+                glColor3f(1.0f, 1.0f, 1.0f);
+                // Center of the dome sits slightly above the last ring
+                glNormal3f(0, 0, 1);
+                glVertex3f(0, -curve2 - 0.005f, z2 + earWidth2 * 0.4f);
+                for (int j = 0; j <= slices; j++) {
+                    float th = (float)j / slices * 2.0f * 3.14159f;
+                    glColor3f(1.0f, 1.0f, 1.0f);
+                    glNormal3f(cosf(th) * 0.3f, sinf(th) * 0.3f, 0.9f);
+                    glVertex3f(earWidth1 * cosf(th), thick1 * sinf(th) - curve1, z1);
+                }
+                glEnd();
+            } else {
+                glBegin(GL_QUAD_STRIP);
+                for (int j = 0; j <= slices; j++) {
+                    float th = (float)j / slices * 2.0f * 3.14159f;
+                    float cosTh = cosf(th);
+                    float sinTh = sinf(th);
+                    
+                    // Pink intensity: only on the FRONT face (sinTh > threshold)
+                    // with thick white borders on left/right edges
+                    float faceFactor = max(0.0f, sinTh - 0.50f) / 0.50f;
+                    // Height: no pink at very base or very tip
+                    float hFact = clampf(f1 * 4.0f, 0, 1) * clampf((1.0f - f1) * 3.0f, 0, 1);
+                    float pinkIntensity = faceFactor * hFact;
+                    
+                    // Warm pink color
+                    float cr = 1.0f;
+                    float cg = 1.0f - 0.30f * pinkIntensity;
+                    float cb = 1.0f - 0.22f * pinkIntensity;
+                    glColor3f(cr, cg, cb);
+
+                    // Recess the pink area inward for 3D rim effect
+                    float depthMul = 1.0f - 0.55f * pinkIntensity;
+                    float rd1 = thick1 * depthMul;
+                    float rd2 = thick2 * depthMul;
+
+                    glNormal3f(cosTh, sinTh * (1.0f - 0.7f * pinkIntensity), 0.15f);
+                    glVertex3f(earWidth2 * cosTh, rd2 * sinTh - curve2, z2);
+                    glVertex3f(earWidth1 * cosTh, rd1 * sinTh - curve1, z1);
+                }
+                glEnd();
+            }
+        }
+        glPopMatrix();
+    }
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+}
+
 void drawHairModel() {
     glDisable(GL_CULL_FACE);
+    drawRabbitEars(); // Add the ears to the model
     drawTopHair();
     drawBackHair();
+    drawSideHair();   // Dense bulk on the sides
     drawLayerStrands();
+    // drawSideFringe(); 
     drawBangs();
     drawAccentStrands();
 }
@@ -1138,19 +1434,28 @@ void display() {
     setupLightingHead(); // Called BEFORE model transformations
     
     glPushMatrix();
-    glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-    glTranslatef(0.0f, 0.0f, 0.2f);
     
-    static GLuint modelList = 0;
-    if (modelList == 0) {
-        modelList = glGenLists(1);
-        glNewList(modelList, GL_COMPILE);
-        drawHeadMesh();
-        drawEyes();
-        drawLips();
-        glEndList();
+    // Position the head in world space relative to the hair's origin
+    // Retracting the previous shift so the face isn't completely buried
+    glTranslatef(0.0f, 0.55f, -0.15f);  
+    
+    // Head.obj naturally faces +Z, but the hair and old head faced -Z
+    glRotatef(180.0f, 0.0f, 1.0f, 0.0f); 
+    
+    // Scale down the object linearly
+    glScalef(0.145f, 0.145f, 0.145f);
+    
+    // Optional internal offset to center exactly
+    glTranslatef(0.0f, -0.2f, -0.5f);
+    
+    static GLuint objModelList = 0;
+    if (objModelList == 0) {
+        bindOBJToDisplayList("Head.obj", objModelList);
     }
-    glCallList(modelList);
+    
+    glBindTexture(GL_TEXTURE_2D, texHeadObj);
+    glCallList(objModelList);
+    
     glPopMatrix();
     glPopAttrib();
 
@@ -1161,8 +1466,15 @@ void display() {
     setupLightingHair(); // Set hair lighting in view space
     
     glPushMatrix();
+    // Rotate to match head upright vector 
     glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-    glTranslatef(0.0f, 0.0f, 0.2f);
+    
+    // Position vertically on the head 
+    glTranslatef(0.0f, 0.0f, 0.36f); 
+    
+    // Scale the entire hair mesh system down to fit the smaller head
+    // X is scaled a bit more to ensure it hugs the cheeks nicely
+    glScalef(0.80f, 0.85f, 0.85f); 
     
     glDisable(GL_TEXTURE_2D); 
     drawHairModel();
@@ -1196,6 +1508,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
 	initOpenGL();
 	
 	texSkin = loadBMP("skin.bmp");
+	texHeadObj = loadBMP("head.bmp"); // load the converted texture
 
 	ShowWindow(hWnd, nCmdShow);
 
