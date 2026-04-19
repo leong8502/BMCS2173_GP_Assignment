@@ -122,16 +122,32 @@ bool  preJ_leftFingerActive[5] = {false, false, false, false, false};
 float preJ_leftFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 bool isNight = false;
+bool isWarmClothing = false;
 bool isShadowPass = false;
 bool isWireframe = false;
-int lightingMode = 0; // 0=Full, 1=Ambient, 2=Diffuse, 3=Off
+int lightingMode = 1; // 1=Ambient, 2=Diffuse
 bool isPerspective = true;
 
 float lightX = 12.0f;
 float lightY = 18.0f;
 float lightZ = -30.0f;
 
+// Spotlight parameters
+float spotAngleX = 0.0f;
+float spotAngleY = 0.0f;
+
 DWORD lastTime = 0;
+
+// Fan trailing particles state
+struct FanParticle {
+    float x, y, z;
+    float vx, vy, vz;
+    float life;
+    float size;
+    float r, g, b;
+    bool active;
+};
+FanParticle fanParticles[500];
 
 //================================
 // Textures
@@ -208,31 +224,46 @@ void setupLightingHead() {
     glLightfv(GL_LIGHT0, GL_AMBIENT, ambientLight);
 
     GLfloat lightPos0[] = { 4.0f, 5.0f, 5.0f, 1.0f };
-    GLfloat white[] = { 0.8f, 0.8f, 0.8f, 1.0f };
-    GLfloat gray[]  = { 0.4f, 0.4f, 0.45f, 1.0f };
+    GLfloat white[] = { 0.8f, 0.8f, 0.8f, 1.0f };    // Bright for ambient mode
+    GLfloat gray[]  = { 0.15f, 0.15f, 0.15f, 1.0f }; // Dull for diffuse mode
     GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    glLightfv(GL_LIGHT0, GL_POSITION, lightPos0);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, black);
 
+    if (isNight) {
+        white[0] = 0.40f; white[1] = 0.40f; white[2] = 0.50f;
+        gray[0]  = 0.05f; gray[1]  = 0.05f; gray[2]  = 0.08f;
+    }
+
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos0);
     GLfloat lightPos1[] = { -4.0f, 2.0f, -1.0f, 1.0f };
     
-    // Light 0 (Main)
-    glLightfv(GL_LIGHT0, GL_AMBIENT,  (lightingMode == 2) ? black : gray);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE,  (lightingMode == 1) ? black : white);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : white);
+    if (lightingMode == 1) { // Ambient mode (Face is bright)
+        glLightfv(GL_LIGHT0, GL_AMBIENT, white); 
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, black);
+        glLightfv(GL_LIGHT0, GL_SPECULAR, black);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, white);
 
-    // Light 1 (Fill)
-    glLightfv(GL_LIGHT1, GL_AMBIENT,  black);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE,  (lightingMode == 1) ? black : gray);
-    glLightfv(GL_LIGHT1, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : gray);
+        glLightfv(GL_LIGHT1, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, black);
+        glLightfv(GL_LIGHT1, GL_SPECULAR, black);
 
-    // Light 2 (Back)
-    glLightfv(GL_LIGHT2, GL_AMBIENT,  black);
-    glLightfv(GL_LIGHT2, GL_DIFFUSE,  (lightingMode == 1) ? black : gray);
-    glLightfv(GL_LIGHT2, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : gray);
+        glLightfv(GL_LIGHT2, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, black);
+        glLightfv(GL_LIGHT2, GL_SPECULAR, black);
+    } 
+    else { // Diffuse mode (Face is dull)
+        glLightfv(GL_LIGHT0, GL_AMBIENT, black); 
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, gray); 
+        glLightfv(GL_LIGHT0, GL_SPECULAR, black);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, black);
 
-    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (lightingMode == 2) ? black : gray);
+        glLightfv(GL_LIGHT1, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, gray);
+        glLightfv(GL_LIGHT1, GL_SPECULAR, black);
+
+        glLightfv(GL_LIGHT2, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, gray);
+        glLightfv(GL_LIGHT2, GL_SPECULAR, black);
+    }
 
     if (lightingMode == 3) glDisable(GL_LIGHTING);
     else glEnable(GL_LIGHTING);
@@ -251,26 +282,32 @@ void setupLightingHair() {
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glShadeModel(GL_SMOOTH);
 
-    GLfloat amb[] = { 0.30f, 0.30f, 0.38f, 1 };
+    GLfloat amb[] = { 0.8f, 0.8f, 0.8f, 1 }; // Bright for ambient mode
     GLfloat kp[] = { 2.5f, 4, 5.5f, 1 };
-    GLfloat kd[] = { 0.85f, 0.85f, 0.92f, 1 };
+    GLfloat kd[] = { 0.15f, 0.15f, 0.15f, 1 }; // Dull for diffuse mode
     GLfloat ks[] = { 1, 1, 1, 1 };
-    glLightfv(GL_LIGHT0, GL_AMBIENT, amb);
     glLightfv(GL_LIGHT0, GL_POSITION, kp);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, kd);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, ks);
 
     GLfloat fp[] = { -3, 1.5f, -2, 1 };
-    GLfloat fd[] = { 0.18f, 0.20f, 0.32f, 1 };
+    GLfloat fd[] = { 0.15f, 0.15f, 0.15f, 1 }; // Dull for diffuse mode
     glLightfv(GL_LIGHT1, GL_POSITION, fp);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE, fd);
 
     GLfloat rp[] = { 0, 3, -4, 1 };
-    GLfloat rd[] = { 0.22f, 0.28f, 0.42f, 1 };
+    GLfloat rd[] = { 0.15f, 0.15f, 0.15f, 1 }; // Dull for diffuse mode
     GLfloat rs[] = { 0.5f, 0.6f, 0.85f, 1 };
+
+    if (isNight) {
+        for (int i = 0; i < 3; i++) {
+            amb[i] *= 0.5f;
+            kd[i] *= 0.3f;
+            ks[i] *= 0.3f;
+            fd[i] *= 0.3f;
+            rd[i] *= 0.3f;
+            rs[i] *= 0.3f;
+        }
+    }
+
     glLightfv(GL_LIGHT2, GL_POSITION, rp);
-    glLightfv(GL_LIGHT2, GL_DIFFUSE, rd);
-    glLightfv(GL_LIGHT2, GL_SPECULAR, rs);
 
     GLfloat ms[] = { 0.55f, 0.65f, 0.90f, 1 };
     GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -279,15 +316,35 @@ void setupLightingHair() {
     glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, msh);
 
     // Update hair lights based on mode
-    glLightfv(GL_LIGHT0, GL_AMBIENT,  (lightingMode == 2) ? black : amb);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE,  (lightingMode == 1) ? black : kd);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : ms);
+    if (lightingMode == 1) { // Ambient mode (Hair is bright)
+        glLightfv(GL_LIGHT0, GL_AMBIENT, amb);
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, black);
+        glLightfv(GL_LIGHT0, GL_SPECULAR, black);
 
-    glLightfv(GL_LIGHT1, GL_AMBIENT,  black);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE,  (lightingMode == 1) ? black : kd);
-    glLightfv(GL_LIGHT1, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : ms);
-    
-    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (lightingMode == 2) ? black : amb);
+        glLightfv(GL_LIGHT1, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, black);
+        glLightfv(GL_LIGHT1, GL_SPECULAR, black);
+
+        glLightfv(GL_LIGHT2, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, black);
+        glLightfv(GL_LIGHT2, GL_SPECULAR, black);
+
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
+    } else { // Diffuse mode (Hair is dull)
+        glLightfv(GL_LIGHT0, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, kd);
+        glLightfv(GL_LIGHT0, GL_SPECULAR, black);
+
+        glLightfv(GL_LIGHT1, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, fd);
+        glLightfv(GL_LIGHT1, GL_SPECULAR, black);
+
+        glLightfv(GL_LIGHT2, GL_AMBIENT, black);
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, rd);
+        glLightfv(GL_LIGHT2, GL_SPECULAR, black);
+
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, black);
+    }
 
     if (lightingMode == 3) glDisable(GL_LIGHTING);
     else glEnable(GL_LIGHTING);
@@ -1237,6 +1294,22 @@ void updateAnimation()
         kAnimSpin += 1440.0f * dt; 
     }
 
+    // Update trailing fan particles
+    for (int i = 0; i < 500; i++) {
+        if (fanParticles[i].active) {
+            fanParticles[i].life -= 2.0f * dt; // Last slightly longer (0.5s)
+            if (fanParticles[i].life <= 0.0f) {
+                fanParticles[i].active = false;
+            } else {
+                // Drift outwards
+                fanParticles[i].x += fanParticles[i].vx * dt;
+                fanParticles[i].y += fanParticles[i].vy * dt;
+                fanParticles[i].z += fanParticles[i].vz * dt;
+                fanParticles[i].size *= (1.0f - dt * 2.5f); // Shrink faster to compensate for bigger initial size
+            }
+        }
+    }
+
     // J animation update
     if (jAnimationActive) {
         float jTotalDuration = 3.0f; // Total spin + strike duration
@@ -1308,14 +1381,25 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         // Reset
         case VK_SPACE: resetAll(); break;
 
-        // Camera orbit / height / zoom
-        case VK_LEFT:  if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle -= 0.05f; break;
-        case VK_RIGHT: if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle += 0.05f; break;
-        case VK_UP:    if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraHeight += 0.3f; break;
+        // Camera orbit / height / zoom (or Spotlight direction with SHIFT)
+        case VK_LEFT:  
+            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle -= 0.05f; 
+            else spotAngleY -= 2.0f;
+            break;
+        case VK_RIGHT: 
+            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle += 0.05f; 
+            else spotAngleY += 2.0f;
+            break;
+        case VK_UP:    
+            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraHeight += 0.3f; 
+            else spotAngleX -= 2.0f;
+            break;
         case VK_DOWN:
             if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
                 cameraHeight -= 0.3f;
                 if (cameraHeight < 0.5f) cameraHeight = 0.5f;
+            } else {
+                spotAngleX += 2.0f;
             }
             break;
         case VK_ADD:    case VK_OEM_PLUS:  cameraDistance -= 0.3f; break;
@@ -1414,13 +1498,21 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             isNight = !isNight;
             break;
 
+        case 'B':
+            isWarmClothing = !isWarmClothing;
+            if (cachedBodyList != 0) {
+                glDeleteLists(cachedBodyList, 1);
+                cachedBodyList = 0;
+            }
+            break;
+
         case 'I':
             isWireframe = !isWireframe;
             break;
 
         case 'L': 
-            // Cycle: 0: Full, 1: Ambient, 2: Diffuse, 3: Off
-            if (++lightingMode > 3) lightingMode = 0;
+            // Toggle between Ambient (1) and Diffuse (2)
+            lightingMode = (lightingMode == 1) ? 2 : 1;
             break;
 
         case 'H':
@@ -1516,6 +1608,29 @@ void setupLighting()
     glLightfv(GL_LIGHT0, GL_AMBIENT,  (lightingMode == 2) ? black : ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE,  (lightingMode == 1) ? black : diffuse);
     glLightfv(GL_LIGHT0, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : specular);
+
+    // Spotlight (Light 3) setup
+    GLfloat spotPos[] = { 0.0f, 25.0f, 0.0f, 1.0f }; // High above center
+    GLfloat spotColor[] = { 1.0f, 0.9f, 0.6f, 1.0f }; // Warm spotlight
+
+    glLightfv(GL_LIGHT3, GL_POSITION, spotPos);
+    glLightfv(GL_LIGHT3, GL_AMBIENT,  black);
+    glLightfv(GL_LIGHT3, GL_DIFFUSE,  (lightingMode == 1) ? black : spotColor);
+    glLightfv(GL_LIGHT3, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : spotColor);
+    
+    glLightf(GL_LIGHT3, GL_SPOT_CUTOFF, 25.0f); // 25 degree cone
+    glLightf(GL_LIGHT3, GL_SPOT_EXPONENT, 10.0f); // Soft edges
+
+    // Calculate spotlight direction from angles
+    float radX = spotAngleX * 3.14159f / 180.0f;
+    float radY = spotAngleY * 3.14159f / 180.0f;
+    GLfloat spotDir[3];
+    spotDir[0] = sin(radY) * cos(radX);
+    spotDir[1] = -cos(radX); // default points down
+    spotDir[2] = cos(radY) * sin(radX); // pitch moves it along Z
+    
+    glLightfv(GL_LIGHT3, GL_SPOT_DIRECTION, spotDir);
+    glEnable(GL_LIGHT3);
 
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (lightingMode == 2) ? black : ambient);
 
@@ -2288,7 +2403,9 @@ void drawLegBase(bool isLeft)
         drawRoundTrim(0.14f);
         glTranslatef(0,0,0.06f);
         if (!isShadowPass) {
-            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texFabric);
+            glBindTexture(GL_TEXTURE_2D, texFabric);
+            if (isWarmClothing) glColor3f(1.0f, 0.3f, 0.2f);
+            else                glColor3f(1,1,1);
         }
         drawProceduralLegPart(0.65f, 0.12f,0.12f, 0.07f,0.07f, 60,50, 0.015f,0.2f);
         glTranslatef(0,0,0.65f);
@@ -2306,7 +2423,9 @@ void drawLegBase(bool isLeft)
         drawRoundTrim(0.16f);
         glTranslatef(0,0,0.06f);
         if (!isShadowPass) {
-            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texFabric);
+            glBindTexture(GL_TEXTURE_2D, texFabric);
+            if (isWarmClothing) glColor3f(1.0f, 0.3f, 0.2f); // Red sock
+            else                glColor3f(1,1,1);
         }
         drawProceduralLegPart(0.24f, 0.14f,0.14f, 0.12f,0.12f, 60,30, 0.012f,0.5f);
         glTranslatef(0,0,0.24f);
@@ -2324,7 +2443,9 @@ void drawLegBase(bool isLeft)
     }
 
     // Boot inner ankle
-    glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texWhiteLeather);
+    if (isWarmClothing) glColor3f(1.0f, 0.4f, 0.2f); // Warm leather
+    else                glColor3f(1,1,1);
+    glBindTexture(GL_TEXTURE_2D, texWhiteLeather);
     drawProceduralLegPart(0.12f, 0.08f,0.08f, 0.085f,0.085f, 60,20, 0.0f,0.0f);
 
     // Boot flap top
@@ -2343,7 +2464,9 @@ void drawLegBase(bool isLeft)
 
     glTranslatef(0,0,0.13f); // ankle joint
 
-    glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texWhiteLeather);
+    if (isWarmClothing) glColor3f(1.0f, 0.4f, 0.2f);
+    else                glColor3f(1,1,1);
+    glBindTexture(GL_TEXTURE_2D, texWhiteLeather);
     gluSphere(quad, 0.09f, 40,40);
 
     // Boot foot group
@@ -2356,7 +2479,9 @@ void drawLegBase(bool isLeft)
     gluSphere(quad,1.0f,60,60);
     glPopMatrix();
 
-    glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texDarkLeather);
+    if (isWarmClothing) glColor3f(0.5f, 0.1f, 0.05f); // Deep red sole
+    else                glColor3f(1,1,1);
+    glBindTexture(GL_TEXTURE_2D, texDarkLeather);
     glPushMatrix();
     glTranslatef(0,0.04f,0.07f);
     glScalef(0.09f,0.14f,0.035f);
@@ -2536,7 +2661,8 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     glRotatef(isLeft?-3.0f:3.0f, 0,1,0);
     glRotatef(0.0f, 1,0,0);
     float peakZ=0.25f, peakX=isLeft?-0.06f:0.06f, width=0.13f;
-    glColor3f(0.2f,0.22f,0.3f);
+    if (isWarmClothing) glColor3f(0.6f, 0.15f, 0.05f); // Red Pauldron
+    else                glColor3f(0.2f,0.22f,0.3f);    // Blue Pauldron
     glBegin(GL_TRIANGLES);
     float nx_p=isLeft?-1.0f:1.0f;
     glNormal3f(nx_p,0,0);
@@ -2598,7 +2724,8 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, texWhiteSleeve);
     }
-    glColor3f(1,1,1);
+    if (isWarmClothing) glColor3f(1.0f, 0.9f, 0.5f); // Yellowed sleeve
+    else                glColor3f(1,1,1);
     drawProceduralArmPart(0.42f,0.115f,0.115f,0.21f,0.21f,60,30,0.02f,0.5f,
                           0.0f,2.0f*3.14159265f,0.02f,8);
     if (!isShadowPass) {
@@ -2626,7 +2753,9 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     drawProceduralArmPart(0.53f,0.10f,0.10f,wristRx,wristRy,40,40,0.015f,0.3f);
 
     // Forearm sleeve
-    glBindTexture(GL_TEXTURE_2D, texFabric); glColor3f(1,1,1);
+    glBindTexture(GL_TEXTURE_2D, texFabric); 
+    if (isWarmClothing) glColor3f(1.0f, 0.3f, 0.2f); // Tinted red
+    else                glColor3f(1,1,1);
     drawProceduralArmPart(0.53f,0.105f,0.105f,wristRx+0.003f,wristRy+0.003f,40,20,0.015f,0.3f);
 
     // Gold wrist rings
@@ -2776,6 +2905,73 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
             glRotatef(10.0f, 0.0f, 1.0f, 0.0f);
             glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
             glRotatef(leftArmAngle - walkArmSwing, 1.0f, 0.0f, 0.0f);
+
+            if (!isShadowPass) {
+                // 1. Draw existing particles forming the trail
+                glDisable(GL_LIGHTING); // make fragments pure glowing colors!
+                glDisable(GL_TEXTURE_2D);
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for magic look
+
+                glBegin(GL_QUADS);
+                for (int i = 0; i < 500; i++) {
+                    if (fanParticles[i].active) {
+                        float s = fanParticles[i].size;
+                        glColor4f(fanParticles[i].r, fanParticles[i].g, fanParticles[i].b, fanParticles[i].life);
+                        // Draw main particle body
+                        glVertex3f(fanParticles[i].x - s, fanParticles[i].y - s, fanParticles[i].z);
+                        glVertex3f(fanParticles[i].x + s, fanParticles[i].y - s, fanParticles[i].z);
+                        glVertex3f(fanParticles[i].x + s, fanParticles[i].y + s, fanParticles[i].z);
+                        glVertex3f(fanParticles[i].x - s, fanParticles[i].y + s, fanParticles[i].z);
+                        
+                        // Overdraw an inner bright core for an intense magical glow
+                        glColor4f(1.0f, 1.0f, 1.0f, fanParticles[i].life * 0.9f);
+                        float cs = s * 0.4f;
+                        glVertex3f(fanParticles[i].x - cs, fanParticles[i].y - cs, fanParticles[i].z + 0.005f);
+                        glVertex3f(fanParticles[i].x + cs, fanParticles[i].y - cs, fanParticles[i].z + 0.005f);
+                        glVertex3f(fanParticles[i].x + cs, fanParticles[i].y + cs, fanParticles[i].z + 0.005f);
+                        glVertex3f(fanParticles[i].x - cs, fanParticles[i].y + cs, fanParticles[i].z + 0.005f);
+                    }
+                }
+                glEnd();
+                glDisable(GL_BLEND);
+                glEnable(GL_LIGHTING);
+
+                // 2. Spawn massive amounts of new particles at the Fan's current active depth
+                for (int p = 0; p < 10; p++) { // Spawning 10 huge fragments per frame!
+                    for (int i = 0; i < 500; i++) {
+                        if (!fanParticles[i].active) {
+                            fanParticles[i].active = true;
+                            fanParticles[i].life = 1.0f + ((rand() % 100) / 250.0f); // 1.0 to 1.4
+                            
+                            // Mix huge shattered fragments with smaller trail dust
+                            if (p % 3 == 0) fanParticles[i].size = 0.12f + ((rand() % 100) / 800.0f); 
+                            else            fanParticles[i].size = 0.03f + ((rand() % 100) / 1000.0f); 
+                            
+                            // Wide chaotic spread area
+                            fanParticles[i].x = ((rand() % 100) / 100.0f - 0.5f) * 1.5f;
+                            fanParticles[i].y = ((rand() % 100) / 100.0f - 0.5f) * 0.6f;
+                            fanParticles[i].z = kAnimDistance;
+
+                            // Aggressive outward explosion velocities
+                            fanParticles[i].vx = ((rand() % 100) / 100.0f - 0.5f) * 4.5f;
+                            fanParticles[i].vy = ((rand() % 100) / 100.0f - 0.5f) * 4.5f;
+                            fanParticles[i].vz = ((rand() % 100) / 100.0f - 0.5f) * 1.5f;
+
+                            // Multicolor extravagant palette (Cyan, Blue, Magenta)
+                            int colorType = rand() % 3;
+                            if (colorType == 0) { 
+                                fanParticles[i].r = 0.1f; fanParticles[i].g = 0.8f + (rand()%20)/100.0f; fanParticles[i].b = 1.0f; 
+                            } else if (colorType == 1) { 
+                                fanParticles[i].r = 0.0f; fanParticles[i].g = 0.3f + (rand()%20)/100.0f; fanParticles[i].b = 1.0f; 
+                            } else { 
+                                fanParticles[i].r = 1.0f; fanParticles[i].g = 0.2f + (rand()%20)/100.0f; fanParticles[i].b = 0.9f; 
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
 
             // Move purely forward (+Z in character space)
             glTranslatef(0.0f, 0.0f, kAnimDistance);
@@ -2973,7 +3169,12 @@ void drawDressMesh()
             float shade=0.95f+0.1f*cos(theta); if(shade>1)shade=1;
             auto applyGrad=[&](float f){
                 float t=f*1.5f; if(t>1)t=1;
-                glColor3f((0.40f+t*0.60f)*shade,(0.65f+t*0.35f)*shade,shade);
+                if (isWarmClothing) {
+                    // Golden/Orange gradient
+                    glColor3f(shade, (0.75f + t*0.25f)*shade, (0.1f + t*0.4f)*shade);
+                } else {
+                    glColor3f((0.40f+t*0.60f)*shade,(0.65f+t*0.35f)*shade,shade);
+                }
             };
             applyGrad(f2); glNormal3f(nx2,ny2,nz2); glVertex3f(px2,py2,pz2);
             applyGrad(f1); glNormal3f(nx1,ny1,nz1); glVertex3f(px1,py1,pz1);
@@ -2999,7 +3200,11 @@ void drawDressMesh()
             getDressTorsoVertex(z1,theta,0.025f,px1,py1,pz1);
             getDressTorsoNormal(z1,theta,0.025f,nx1,ny1,nz1);
             float dS=0.5f+0.5f*f1, cS=0.85f+0.15f*cos(theta*2),shade=dS*cS;
-            glColor3f(0.04f*shade,0.15f*shade,0.45f*shade);
+            if (isWarmClothing) {
+                glColor3f(0.7f*shade, 0.1f*shade, 0.05f*shade); // Deep Red
+            } else {
+                glColor3f(0.04f*shade,0.15f*shade,0.45f*shade); // Deep Blue
+            }
             glNormal3f(nx2,ny2,nz2); glVertex3f(px2,py2,pz2);
             glNormal3f(nx1,ny1,nz1); glVertex3f(px1,py1,pz1);
         }
@@ -3097,7 +3302,8 @@ void drawDressMesh()
     }
 
     // 4. High collar
-    glColor3f(0.04f,0.15f,0.45f);
+    if (isWarmClothing) glColor3f(0.65f, 0.1f, 0.05f);
+    else                glColor3f(0.04f,0.15f,0.45f);
     glBegin(GL_QUAD_STRIP);
     for(int j=0;j<=slices;j++){
         float theta=(float)j/slices*2*3.14159f;
@@ -3367,6 +3573,8 @@ void drawPlanarShadow()
     glEnable(GL_LIGHTING);
     glDisable(GL_LIGHT0);
     glDisable(GL_LIGHT1);
+    glDisable(GL_LIGHT2);
+    glDisable(GL_LIGHT3); // Ensure spotlight doesn't light up the shadow!
     glDisable(GL_COLOR_MATERIAL); // Critical: Ignore all glColor3f calls inside the character meshes
     glDisable(GL_TEXTURE_2D);
 
