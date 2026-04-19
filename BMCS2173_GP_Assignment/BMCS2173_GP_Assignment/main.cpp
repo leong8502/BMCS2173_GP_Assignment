@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <vector>
 #include <string>
-#include <fstream>
+#include <fstream>aw
 #include <sstream>
 
 using std::max;
@@ -26,6 +26,7 @@ using std::max;
 
 const float PI = 3.1415926535f;
 const float TWO_PI = 6.283185307f;
+const float CHARACTER_BODY_SCALE = 0.85f; // Scale factor for the body (proportional scaling)
 
 struct Vec3 { float x, y, z; };
 struct Vec2 { float u, v; };
@@ -123,6 +124,8 @@ float preJ_leftFingerProgress[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 bool isNight = false;
 bool isShadowPass = false;
 bool isWireframe = false;
+int lightingMode = 0; // 0=Full, 1=Ambient, 2=Diffuse, 3=Off
+bool isPerspective = true;
 
 float lightX = 12.0f;
 float lightY = 18.0f;
@@ -206,21 +209,34 @@ void setupLightingHead() {
 
     GLfloat lightPos0[] = { 4.0f, 5.0f, 5.0f, 1.0f };
     GLfloat white[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+    GLfloat gray[]  = { 0.4f, 0.4f, 0.45f, 1.0f };
     GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos0);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
     glLightfv(GL_LIGHT0, GL_SPECULAR, black);
 
     GLfloat lightPos1[] = { -4.0f, 2.0f, -1.0f, 1.0f };
-    GLfloat lightDiff1[] = { 0.3f, 0.3f, 0.4f, 1.0f }; // Soft cool fill
-    glLightfv(GL_LIGHT1, GL_POSITION, lightPos1);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE, lightDiff1);
     
-    GLfloat lightPos2[] = { 0.0f, 5.0f, -5.0f, 1.0f }; // Rim light from behind
-    GLfloat lightDiff2[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-    glLightfv(GL_LIGHT2, GL_POSITION, lightPos2);
-    glLightfv(GL_LIGHT2, GL_DIFFUSE, lightDiff2);
-    
+    // Light 0 (Main)
+    glLightfv(GL_LIGHT0, GL_AMBIENT,  (lightingMode == 2) ? black : gray);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,  (lightingMode == 1) ? black : white);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : white);
+
+    // Light 1 (Fill)
+    glLightfv(GL_LIGHT1, GL_AMBIENT,  black);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE,  (lightingMode == 1) ? black : gray);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : gray);
+
+    // Light 2 (Back)
+    glLightfv(GL_LIGHT2, GL_AMBIENT,  black);
+    glLightfv(GL_LIGHT2, GL_DIFFUSE,  (lightingMode == 1) ? black : gray);
+    glLightfv(GL_LIGHT2, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : gray);
+
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (lightingMode == 2) ? black : gray);
+
+    if (lightingMode == 3) glDisable(GL_LIGHTING);
+    else glEnable(GL_LIGHTING);
+
     GLfloat specColor[] = { 0.15f, 0.15f, 0.15f, 1.0f };
     glMaterialfv(GL_FRONT, GL_SPECULAR, specColor);
     glMateriali(GL_FRONT, GL_SHININESS, 16);
@@ -257,9 +273,24 @@ void setupLightingHair() {
     glLightfv(GL_LIGHT2, GL_SPECULAR, rs);
 
     GLfloat ms[] = { 0.55f, 0.65f, 0.90f, 1 };
+    GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
     GLfloat msh[] = { 60 };
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, ms);
     glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, msh);
+
+    // Update hair lights based on mode
+    glLightfv(GL_LIGHT0, GL_AMBIENT,  (lightingMode == 2) ? black : amb);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,  (lightingMode == 1) ? black : kd);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : ms);
+
+    glLightfv(GL_LIGHT1, GL_AMBIENT,  black);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE,  (lightingMode == 1) ? black : kd);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : ms);
+    
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (lightingMode == 2) ? black : amb);
+
+    if (lightingMode == 3) glDisable(GL_LIGHTING);
+    else glEnable(GL_LIGHTING);
 }
 
 // ----------------------------------------------------------------
@@ -1387,6 +1418,15 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             isWireframe = !isWireframe;
             break;
 
+        case 'L': 
+            // Cycle: 0: Full, 1: Ambient, 2: Diffuse, 3: Off
+            if (++lightingMode > 3) lightingMode = 0;
+            break;
+
+        case 'H':
+            isPerspective = !isPerspective;
+            break;
+
         case 'J':
             if (!jAnimationActive && !kAnimationActive && weapon1_status) {
                 jAnimationActive = true;
@@ -1468,10 +1508,19 @@ void setupLighting()
     glLightfv(GL_LIGHT0, GL_AMBIENT,  ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE,  diffuse);
     glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
-    glLightf(GL_LIGHT0, GL_CONSTANT_ATTENUATION,  1.0f);
-    glLightf(GL_LIGHT0, GL_LINEAR_ATTENUATION,    0.0f);
-    glLightf(GL_LIGHT0, GL_QUADRATIC_ATTENUATION, 0.0f);
     glLightf(GL_LIGHT0, GL_SPOT_CUTOFF, 180.0f);
+
+    GLfloat black[] = { 0,0,0,1 };
+    
+    // Light 0 overrides
+    glLightfv(GL_LIGHT0, GL_AMBIENT,  (lightingMode == 2) ? black : ambient);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,  (lightingMode == 1) ? black : diffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, (lightingMode == 1 || lightingMode == 2) ? black : specular);
+
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (lightingMode == 2) ? black : ambient);
+
+    if (lightingMode == 3) glDisable(GL_LIGHTING);
+    else glEnable(GL_LIGHTING);
 }
 
 //================================================================
@@ -1483,13 +1532,14 @@ void drawGround()
     glEnable(GL_LIGHTING);
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texGrass);
-    glColor3f(1.0f, 1.0f, 1.0f);
+    if (isNight) glColor3f(0.6f, 0.6f, 0.7f); // Lighter tint so it doesn't turn pitch black under dim lighting
+    else glColor3f(1.0f, 1.0f, 1.0f);
     glNormal3f(0.0f, 1.0f, 0.0f);
     glBegin(GL_QUADS);
-    glTexCoord2f( 0.0f,  0.0f); glVertex3f(-60, 0, -60);
-    glTexCoord2f( 0.0f, 20.0f); glVertex3f(-60, 0,  60);
-    glTexCoord2f(20.0f, 20.0f); glVertex3f( 60, 0,  60);
-    glTexCoord2f(20.0f,  0.0f); glVertex3f( 60, 0, -60);
+    glTexCoord2f( 0.0f,  0.0f); glVertex3f(-150, 0, -150);
+    glTexCoord2f( 0.0f, 50.0f); glVertex3f(-150, 0,  150);
+    glTexCoord2f(50.0f, 50.0f); glVertex3f( 150, 0,  150);
+    glTexCoord2f(50.0f,  0.0f); glVertex3f( 150, 0, -150);
     glEnd();
     glDisable(GL_TEXTURE_2D);
 }
@@ -1531,47 +1581,594 @@ void drawSun(float sx, float sy, float sz)
     glEnable(GL_LIGHTING);
 }
 
-void drawMoon(float mx, float my, float mz)
+void drawCube(float size)
+{
+    float h = size * 0.5f;
+    glBegin(GL_QUADS);
+    glNormal3f(0, 0, 1); glVertex3f(-h, -h, h); glVertex3f(h, -h, h); glVertex3f(h, h, h); glVertex3f(-h, h, h);
+    glNormal3f(0, 0, -1); glVertex3f(-h, -h, -h); glVertex3f(-h, h, -h); glVertex3f(h, h, -h); glVertex3f(h, -h, -h);
+    glNormal3f(0, 1, 0); glVertex3f(-h, h, -h); glVertex3f(-h, h, h); glVertex3f(h, h, h); glVertex3f(h, h, -h);
+    glNormal3f(0, -1, 0); glVertex3f(-h, -h, -h); glVertex3f(h, -h, -h); glVertex3f(h, -h, h); glVertex3f(-h, -h, h);
+    glNormal3f(-1, 0, 0); glVertex3f(-h, -h, -h); glVertex3f(-h, -h, h); glVertex3f(-h, h, h); glVertex3f(-h, h, -h);
+    glNormal3f(1, 0, 0); glVertex3f(h, -h, -h); glVertex3f(h, h, -h); glVertex3f(h, h, h); glVertex3f(h, -h, h);
+    glEnd();
+}
+
+void drawGiantMoon()
 {
     GLUquadric* q = gluNewQuadric();
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
-    // Main moon body (pale silver)
-    glColor3f(0.9f, 0.9f, 0.95f);
-    glPushMatrix(); glTranslatef(mx, my, mz); gluSphere(q, 1.5f, 32, 32); glPopMatrix();
-
-    // Subtle glow (very pale blue)
-    glColor3f(0.7f, 0.7f, 0.9f);
-    glPushMatrix(); glTranslatef(mx, my, mz); gluSphere(q, 1.7f, 32, 32); glPopMatrix();
-
+    for (int i = 0; i < 5; i++) {
+        float r = 45.0f + i * 4.0f;
+        float alpha = 0.5f / (i + 1);
+        glColor4f(1.0f, 0.98f, 0.9f, alpha);
+        glPushMatrix();
+        glTranslatef(0, -10, -120);
+        gluDisk(q, 0, r, 64, 1); 
+        glPopMatrix();
+    }
+    glDisable(GL_BLEND);
     gluDeleteQuadric(q);
     glEnable(GL_LIGHTING);
 }
 
-void drawBackground()
+void drawRiver()
 {
-    GLfloat lightPos[] = { lightX, lightY, lightZ, 1.0f };
-    glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    // Curved river passing through the middle of the town
+    glBegin(GL_QUAD_STRIP);
+    for (float x = -150.0f; x <= 150.0f; x += 5.0f) {
+        float curveOffset = sin(x * 0.08f) * 6.0f;
+        
+        glColor4f(0.05f, 0.15f, 0.3f, 0.85f); 
+        glVertex3f(x, 0.05f, -40 + curveOffset);
+        
+        glColor4f(0.1f, 0.3f, 0.5f, 0.85f); 
+        glVertex3f(x, 0.05f, -25 + curveOffset);
+    }
+    glEnd();
+    
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
+}
 
-    if (!isNight) {
-        drawSun(lightX, lightY, lightZ);
-    } else {
-        drawMoon(lightX, lightY, lightZ);
+void drawDistantMountains()
+{
+    glDisable(GL_LIGHTING);
+    glColor3f(0.01f, 0.01f, 0.04f);
+    glBegin(GL_TRIANGLES);
+    glVertex3f(-150, 0, -100); glVertex3f(-80, 15, -100); glVertex3f(-20, 0, -100);
+    glVertex3f(-50, 0, -105); glVertex3f(10, 20, -105); glVertex3f(60, 0, -105);
+    glVertex3f(30, 0, -100); glVertex3f(90, 12, -100); glVertex3f(150, 0, -100);
+    glEnd();
+    glEnable(GL_LIGHTING);
+}
+
+void drawPalaceRoof(float w, float h, float d)
+{
+    glColor3f(0.45f, 0.08f, 0.08f);
+    glBegin(GL_TRIANGLES);
+    float fx = w * 1.3f, fz = d * 1.3f;
+    glVertex3f(0, h, 0); glVertex3f(-fx, 0, fz); glVertex3f( fx, 0, fz);
+    glVertex3f(0, h, 0); glVertex3f( fx, 0, -fz); glVertex3f(-fx, 0, -fz);
+    glVertex3f(0, h, 0); glVertex3f(-fx, 0, -fz); glVertex3f(-fx, 0, fz);
+    glVertex3f(0, h, 0); glVertex3f( fx, 0, fz); glVertex3f( fx, 0, -fz);
+    glEnd();
+}
+
+void drawHighFidLantern(float x, float y, float z)
+{
+    GLUquadric* q = gluNewQuadric();
+    glPushMatrix();
+    glTranslatef(x, y, z);
+    
+    // 1. Dark Wood Post
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texFanWood);
+    glPushMatrix();
+    glRotatef(-90, 1, 0, 0);
+    gluCylinder(q, 0.07f, 0.07f, 3.8f, 8, 1);
+    glPopMatrix();
+    glDisable(GL_TEXTURE_2D);
+
+    // 2. Hanging Bracket (Horizontal arm)
+    glTranslatef(0, 3.8f, 0);
+    glPushMatrix();
+    glTranslatef(0, 0, 0.25f);
+    glScalef(0.12f, 0.12f, 0.6f);
+    drawCube(1.0f);
+    glPopMatrix();
+
+    // 3. The Lantern Pagoda
+    glTranslatef(0, -0.4f, 0.55f);
+    
+    // Center Hexagonal Body (Inner Glow)
+    glDisable(GL_LIGHTING);
+    glColor3f(1.0f, 0.85f, 0.3f); // Warm gold glow
+    glPushMatrix();
+    glRotatef(-90, 1, 0, 0);
+    glTranslatef(0, 0, -0.3f);
+    gluCylinder(q, 0.35f, 0.35f, 0.6f, 6, 1); // Hexagonal body
+    glPopMatrix();
+    
+    // Hexagonal Body Caps (Red rims)
+    glColor3f(0.6f, 0.1f, 0.05f);
+    glPushMatrix();
+    glTranslatef(0, -0.3f, 0); glRotatef(-90, 1, 0, 0); gluDisk(q, 0, 0.38f, 6, 1);
+    glPopMatrix();
+    glPushMatrix();
+    glTranslatef(0, 0.3f, 0); glRotatef(-90, 1, 0, 0); gluDisk(q, 0, 0.38f, 6, 1);
+    glPopMatrix();
+
+    // 4. Mini Pagoda Roof on top of lantern
+    glTranslatef(0, 0.35f, 0);
+    drawPalaceRoof(0.35f, 0.25f, 0.35f);
+    
+    // 5. Red Tassels hanging from roof corners
+    glColor3f(0.8f, 0.05f, 0.05f);
+    float tw = 0.45f;
+    float tx[] = {-tw, tw, tw, -tw}, tz[] = {tw, tw, -tw, -tw};
+    for(int i=0; i<4; i++) {
+        glPushMatrix();
+        glTranslatef(tx[i], -0.2f, tz[i]);
+        glScalef(0.05f, 0.8f, 0.02f);
+        drawCube(1.0f);
+        glPopMatrix();
+    }
+    glEnable(GL_LIGHTING);
+
+    gluDeleteQuadric(q);
+    glPopMatrix();
+}
+
+void drawStonePath()
+{
+    glDisable(GL_LIGHTING);
+    
+    // Draw individual stone slabs for better distance visibility
+    for (float z = 20.0f; z > -150.0f; z -= 5.0f) {
+        glBegin(GL_QUADS);
+        // Vary the shard brightness slightly for a natural stone look
+        float shade = 0.28f + ( (int)fabs(z) % 3 ) * 0.03f;
+        glColor3f(shade, shade, shade + 0.05f); 
+        
+        float slabWidth = 2.8f;
+        float slabLength = 5.05f; // Match step for continuity (slight overlap)
+        float y = 0.12f; 
+        
+        glVertex3f(-slabWidth, y, z); 
+        glVertex3f( slabWidth, y, z);
+        glVertex3f( slabWidth, y, z - slabLength);
+        glVertex3f(-slabWidth, y, z - slabLength);
+        glEnd();
+
+        // Slab joints (very subtle line to show where tiles meet)
+        glColor3f(shade - 0.05f, shade - 0.05f, shade - 0.02f);
+        glBegin(GL_LINES);
+        glVertex3f(-slabWidth, y + 0.01f, z); glVertex3f(slabWidth, y + 0.01f, z);
+        glEnd();
+    }
+    
+    glEnable(GL_LIGHTING);
+
+    // Lining the path with HIGH-FIDELITY lanterns - scatttered and avoiding the river
+    for (int i = 0; i < 12; i++) {
+        float zBase = 15.0f - i * 8.5f;
+        
+        // Left side lantern with random offset
+        float xL = -4.5f - rr(i * 31, 0.0f, 2.0f);
+        float zL = zBase + rr(i * 37, -3.0f, 3.0f);
+        // Avoid river zone [-43, -22]
+        if (!(zL < -22.0f && zL > -44.0f)) {
+            // Randomly skip a few to make it more messy
+            if (hf(i * 41) > 0.15f) drawHighFidLantern(xL, 0, zL);
+        }
+
+        // Right side lantern with random offset
+        float xR = 4.5f + rr(i * 43, 0.0f, 2.0f);
+        float zR = zBase + rr(i * 47, -3.0f, 3.0f);
+        // Avoid river zone [-43, -22]
+        if (!(zR < -22.0f && zR > -44.0f)) {
+            // Randomly skip a few to make it more messy
+            if (hf(i * 53) > 0.15f) drawHighFidLantern(xR, 0, zR);
+        }
+    }
+}
+
+void drawWaterDetails()
+{
+    GLUquadric* q = gluNewQuadric();
+    glDisable(GL_LIGHTING);
+    
+    // Add floating lily pads
+    float lpx[] = {-15, 12, -22, 18, -8, 25, -45, 30};
+    float lpz[] = {5, -12, 28, -5, 35, 12, 10, 42};
+    for (int i = 0; i < 8; i++) {
+        glPushMatrix();
+        glTranslatef(lpx[i], 0.04f, lpz[i]);
+        glRotatef(-90, 1, 0, 0);
+        glColor3f(0.02f, 0.1f, 0.02f); 
+        gluDisk(q, 0, 1.5f, 16, 1);
+        glPopMatrix();
+    }
+    
+    // Ethereal Mist Layer - Low and far
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBegin(GL_QUADS);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.0f);
+    glVertex3f(-200, 0.05f, 0); 
+    glVertex3f( 200, 0.05f, 0);
+    glColor4f(0.1f, 0.2f, 0.5f, 0.2f); 
+    glVertex3f( 200, 0.05f, -90);
+    glVertex3f(-200, 0.05f, -90);
+    glEnd();
+    glDisable(GL_BLEND);
+    
+    gluDeleteQuadric(q);
+    glEnable(GL_LIGHTING);
+}
+
+void drawExtravagantRoof(float w, float h, float d, bool doubleEave)
+{
+    glPushMatrix();
+    // Bottom eave (if double)
+    if (doubleEave) {
+        glPushMatrix();
+        glScalef(1.2f, 0.4f, 1.2f);
+        drawPalaceRoof(w, h, d);
+        glPopMatrix();
+        glTranslatef(0, h * 0.4f, 0);
+    }
+    drawPalaceRoof(w, h, d);
+    
+    // Golden "Angel" ornaments at corners
+    glDisable(GL_LIGHTING);
+    glColor3f(1.0f, 0.85f, 0.3f); 
+    float fx = w * 1.35f, fz = d * 1.35f;
+    float cx[] = {-fx, fx, fx, -fx}, cz[] = {fz, fz, -fz, -fz};
+    for(int i=0; i<4; i++) {
+        glPushMatrix();
+        glTranslatef(cx[i], 0, cz[i]);
+        GLUquadric* q = gluNewQuadric();
+        gluSphere(q, 0.25f, 8, 8);
+        gluDeleteQuadric(q);
+        glPopMatrix();
+    }
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
+
+void drawPalaceBuilding(int floors, float baseScale, int style = 0)
+{
+    GLUquadric* q = gluNewQuadric();
+    // Main Floor Tiers
+    for (int tier = 0; tier < floors; tier++) {
+        float tierScale = 1.0f - tier * (0.8f / floors);
+        float h = 4.0f;
+        float y = tier * h;
+
+        glPushMatrix();
+        glTranslatef(0, y, 0);
+        glScalef(baseScale * tierScale, 1.0f, baseScale * tierScale);
+        
+        // Pillars
+        if (style == 1) glColor3f(0.15f, 0.35f, 0.2f); // Greenish
+        else if (style == 2) glColor3f(0.15f, 0.2f, 0.35f); // Blueish
+        else glColor3f(0.7f, 0.1f, 0.05f); // Red
+        float pw = 4.0f;
+        float pd = 3.5f;
+        float px[] = {-pw, pw, pw, -pw}, pz[] = {-pd, -pd, pd, pd};
+        for(int i=0; i<4; i++) {
+            glPushMatrix(); glTranslatef(px[i], 0, pz[i]); glRotatef(-90, 1, 0, 0);
+            gluCylinder(q, 0.28f, 0.28f, h, 16, 1); glPopMatrix();
+        }
+
+        // Internal Lattice / Glow
+        glDisable(GL_LIGHTING);
+        if (style == 1) glColor3f(0.8f, 1.0f, 0.5f);
+        else if (style == 2) glColor3f(0.6f, 0.8f, 1.0f);
+        else glColor3f(1.0f, 0.7f, 0.2f); 
+        glPushMatrix(); glScalef(pw*1.75f, h*0.85f, pd*1.75f); glTranslatef(0, 0.5f, 0); drawCube(0.95f); glPopMatrix();
+        glEnable(GL_LIGHTING);
+
+        // Roof
+        glTranslatef(0, h, 0);
+        if (style == 1) drawPalaceRoof(pw * 1.5f, 3.5f, pd * 1.5f);
+        else if (style == 2) drawExtravagantRoof(pw * 1.8f, 2.5f, pd * 1.8f, false);
+        else drawExtravagantRoof(pw * 1.6f, 3.0f, pd * 1.6f, (tier == 0 || tier == floors-1));
+        glPopMatrix();
+    }
+    gluDeleteQuadric(q);
+}
+
+void drawGuanghanPalace()
+{
+    glPushMatrix();
+    glTranslatef(0, 0, -75.0f); 
+    
+    // Foundation
+    glColor3f(0.3f, 0.3f, 0.35f);
+    glPushMatrix(); glScalef(25, 1.0, 20); drawCube(1.0f); glPopMatrix();
+
+    // Central Tower (5 tiers)
+    glPushMatrix();
+    glTranslatef(0, 0.5f, 0);
+    drawPalaceBuilding(5, 1.8f);
+    glPopMatrix();
+
+    // Side Pavilions (Staggered)
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * 18.0f, 0.5f, 5.0f);
+        drawPalaceBuilding(3, 1.2f);
+        glPopMatrix();
+        
+        glPushMatrix();
+        glTranslatef(i * 32.0f, 0.5f, -10.0f);
+        drawPalaceBuilding(2, 1.0f);
+        glPopMatrix();
+    }
+    glPopMatrix();
+}
+
+void drawCuteRabbit()
+{
+    GLUquadric* q = gluNewQuadric();
+    glPushMatrix();
+    
+    // Scale the whole rabbit to fit (made significantly larger!)
+    glScalef(1.3f, 1.3f, 1.3f);
+    glTranslatef(0, 0.8f, 0); // lift above ground
+    
+    // White color with slight warm tint
+    glColor3f(0.95f, 0.95f, 0.98f);
+    
+    // 1. Body (Pear shape)
+    glPushMatrix();
+    glTranslatef(0, -0.4f, 0);
+    glScalef(1.0f, 1.3f, 0.9f);
+    gluSphere(q, 0.5f, 32, 32);
+    glPopMatrix();
+    
+    // 2. Head (Wide sphere)
+    glPushMatrix();
+    glTranslatef(0, 0.4f, 0);
+    glScalef(1.2f, 0.95f, 1.1f);
+    gluSphere(q, 0.55f, 32, 32);
+    glPopMatrix();
+    
+    // 3. Ears
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * 0.25f, 0.9f, 0.0f);
+        glRotatef(i * 10.0f, 0, 0, 1);
+        glRotatef(-5.0f, 1, 0, 0);
+        
+        // Outer ear (white)
+        glColor3f(0.95f, 0.95f, 0.98f);
+        glPushMatrix();
+        glTranslatef(0, 0.4f, 0);
+        glScalef(0.3f, 1.2f, 0.15f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+        
+        // Inner ear (pink)
+        glColor3f(0.9f, 0.4f, 0.5f);
+        glPushMatrix();
+        glTranslatef(0, 0.4f, 0.08f);
+        glScalef(0.18f, 1.0f, 0.05f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+        
+        glPopMatrix();
+    }
+    
+    // 4. Eyes (Black)
+    glColor3f(0.1f, 0.1f, 0.1f);
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * 0.28f, 0.45f, 0.52f);
+        glRotatef(i * -15.0f, 0, 0, 1);
+        glScalef(0.15f, 0.05f, 0.05f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+    }
+    
+    // 5. Cheeks (Pinkish)
+    glColor3f(1.0f, 0.5f, 0.5f);
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * 0.45f, 0.35f, 0.48f);
+        glScalef(0.12f, 0.08f, 0.05f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+    }
+    
+    // 6. Mouth / Nose
+    glColor3f(0.8f, 0.2f, 0.2f); // Red inside mouth
+    glPushMatrix();
+    glTranslatef(0, 0.25f, 0.58f);
+    glRotatef(20.0f, 1, 0, 0); // Open slightly
+    glScalef(0.12f, 0.1f, 0.05f);
+    gluSphere(q, 0.5f, 16, 16);
+    glPopMatrix();
+    
+    // little white teeth
+    glColor3f(1, 1, 1);
+    glPushMatrix();
+    glTranslatef(0, 0.29f, 0.60f);
+    glScalef(0.08f, 0.05f, 0.02f);
+    drawCube(1.0f);
+    glPopMatrix();
+    
+    // small pink nose
+    glColor3f(1.0f, 0.6f, 0.7f);
+    glPushMatrix();
+    glTranslatef(0, 0.35f, 0.61f);
+    glScalef(0.06f, 0.04f, 0.04f);
+    gluSphere(q, 0.5f, 16, 16);
+    glPopMatrix();
+
+    // 7. Arms (Small white capsules)
+    glColor3f(0.95f, 0.95f, 0.98f);
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * 0.35f, -0.2f, 0.35f);
+        glRotatef(i * -25.0f, 0, 0, 1);
+        glRotatef(-30.0f, 1, 0, 0);
+        glScalef(0.15f, 0.4f, 0.15f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+    }
+    
+    // 8. Legs/Feet
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        // Feet planted
+        glTranslatef(i * 0.25f, -0.95f, 0.2f);
+        glScalef(0.18f, 0.1f, 0.35f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+    }
+    
+    // 9. Tail
+    glPushMatrix();
+    glTranslatef(0, -0.6f, -0.45f);
+    glScalef(0.25f, 0.25f, 0.25f);
+    gluSphere(q, 0.5f, 16, 16);
+    glPopMatrix();
+    
+    // 10. Red Bow
+    glColor3f(0.8f, 0.0f, 0.1f);
+    glPushMatrix();
+    glTranslatef(0, -0.05f, 0.45f);
+    glScalef(0.12f, 0.12f, 0.12f);
+    gluSphere(q, 0.5f, 16, 16);
+    glPopMatrix();
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * 0.16f, -0.05f, 0.42f);
+        glRotatef(i * 20.0f, 0, 0, 1);
+        glScalef(0.2f, 0.12f, 0.05f);
+        gluSphere(q, 0.5f, 16, 16);
+        glPopMatrix();
+    }
+    
+    glPopMatrix();
+    gluDeleteQuadric(q);
+}
+
+void drawMoonTown()
+{
+    // Clustered city buildings to create a "town" vibe
+    struct Building { float x, z, s; int f; int style; };
+    Building town[] = {
+        {-22, 12, 0.8f, 2, 0}, {22, 15, 0.9f, 2, 1},
+        {-38, -5, 0.7f, 1, 2}, {38, -10, 1.1f, 2, 0},
+        {-18, 42, 0.6f, 1, 1}, {18, 38, 0.75f, 2, 2},
+        {-45, 20, 1.2f, 3, 0}, {45, 15, 1.0f, 2, 1},
+        {-18, -55, 0.5f, 1, 2}, {25, -60, 0.6f, 1, 0}, // Moved away from river
+        {-55, 45, 1.5f, 3, 1}, {55, 40, 1.3f, 4, 2},
+        {-30, 60, 1.0f, 2, 0}, {35, 55, 0.8f, 2, 1},
+        {-10, 75, 0.7f, 1, 2}, {12, 70, 0.65f, 3, 0}
+    };
+    
+    for (int i = 0; i < 16; i++) {
+        glPushMatrix();
+        glTranslatef(town[i].x, -0.2f, town[i].z);
+        // Face the central path
+        glRotatef( (town[i].x > 0) ? -90 : 90, 0, 1, 0); 
+        // Some random variety in rotation
+        glRotatef( (i%3 == 0) ? 10 : 0, 0, 1, 0);
+        glScalef(town[i].s, town[i].s, town[i].s);
+        drawPalaceBuilding(town[i].f, 1.0f, town[i].style);
+        glPopMatrix();
     }
 
-    drawCloud(-18.0f, 14.0f, -40.0f, 1.5f);
-    drawCloud(-25.0f, 16.0f, -35.0f, 1.2f);
-    drawCloud( 20.0f, 15.0f, -38.0f, 1.8f);
-    drawCloud( 28.0f, 13.0f, -32.0f, 1.1f);
-    drawCloud(-10.0f, 12.0f, -28.0f, 1.4f);
-    drawCloud( 12.0f, 11.0f, -25.0f, 1.6f);
-    drawCloud(-20.0f, 10.0f, -18.0f, 1.0f);
-    drawCloud( 22.0f, 12.0f, -20.0f, 1.3f);
-    drawCloud(  0.0f, 17.0f, -50.0f, 2.0f);
-    drawCloud(-32.0f, 14.0f, -45.0f, 1.7f);
+    // Street-side buildings right behind the lanterns
+    for (int i = 0; i < 8; i++) {
+        float zPosL = 12.0f - i * 14.0f;
+        if (!(zPosL < -20.0f && zPosL > -45.0f)) { // Avoid river
+            glPushMatrix();
+            glTranslatef(-15.0f, -0.2f, zPosL);
+            glRotatef(-90.0f + rr(i*17, -5.0f, 5.0f), 0, 1, 0);
+            float s = 0.6f + rr(i*19, 0.0f, 0.2f);
+            glScalef(s, s, s);
+            drawPalaceBuilding((i % 2) + 2, 1.0f, (i % 3));
+            glPopMatrix();
 
-    drawGround();
+            // Rabbit beside building (rare spawn)
+            if (hf(i*101) > 0.75f) {
+                glPushMatrix();
+                glTranslatef(-10.0f, 0.0f, zPosL + 2.0f);
+                glRotatef(120.0f, 0, 1, 0); // Face towards center path slightly
+                drawCuteRabbit();
+                glPopMatrix();
+            }
+        }
+
+        float zPosR = 8.0f - i * 14.0f;
+        if (!(zPosR < -20.0f && zPosR > -45.0f)) { // Avoid river
+            glPushMatrix();
+            glTranslatef(15.0f, -0.2f, zPosR);
+            glRotatef(90.0f + rr(i*23, -5.0f, 5.0f), 0, 1, 0);
+            float sR = 0.6f + rr(i*29, 0.0f, 0.2f);
+            glScalef(sR, sR, sR);
+            drawPalaceBuilding(((i+1) % 2) + 2, 1.0f, ((i+1) % 3));
+            glPopMatrix();
+
+            // Rabbit beside building (rare spawn)
+            if (hf(i*103) > 0.75f) {
+                glPushMatrix();
+                glTranslatef(10.0f, 0.0f, zPosR - 2.0f);
+                glRotatef(-120.0f, 0, 1, 0);
+                drawCuteRabbit();
+                glPopMatrix();
+            }
+        }
+    }
+}
+
+void drawBackground()
+{
+    if (isNight) {
+        drawGiantMoon();
+        drawDistantMountains();
+        drawGround(); // Put grass on the empty road sides
+        drawRiver(); // Add a river in the middle
+        drawWaterDetails(); 
+        
+        drawStonePath();
+        drawGuanghanPalace();
+        drawMoonTown();
+    } else {
+        // Original Day Background
+        GLfloat lightPos[] = { lightX, lightY, lightZ, 1.0f };
+        glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+        drawSun(lightX, lightY, lightZ);
+        
+        drawCloud(-18.0f, 14.0f, -40.0f, 1.5f);
+        drawCloud(-25.0f, 16.0f, -35.0f, 1.2f);
+        drawCloud( 20.0f, 15.0f, -38.0f, 1.8f);
+        drawCloud( 28.0f, 13.0f, -32.0f, 1.1f);
+        drawCloud(-10.0f, 12.0f, -28.0f, 1.4f);
+        drawCloud( 12.0f, 11.0f, -25.0f, 1.6f);
+        drawCloud(-20.0f, 10.0f, -18.0f, 1.0f);
+        drawCloud( 22.0f, 12.0f, -20.0f, 1.3f);
+        drawCloud(  0.0f, 17.0f, -50.0f, 2.0f);
+        drawCloud(-32.0f, 14.0f, -45.0f, 1.7f);
+
+        drawGround();
+    }
 }
 
 //================================================================
@@ -2804,12 +3401,16 @@ void drawPlanarShadow()
 // charY is the world-Y level of the character's hip joint.
 // Leg total length ≈ 1.25 units (from drawLegBase, origin Y=1.53 to foot).
 // We lift the entire character group so feet rest on Y = 0.
-#define CHAR_Y 1.92f
+const float CHAR_Y = 1.92f * CHARACTER_BODY_SCALE;
 
 void drawHeadAndHair() {
     glPushMatrix();
     // 1. Position at the manually adjusted neck location
-    glTranslatef(0.0f, 0.2f, 1.85f); 
+    glTranslatef(0.0f, 0.2f, 1.90f); 
+    
+    // Scale back up to original size to compensate for global body scaling
+    float invS = 1.0f / CHARACTER_BODY_SCALE;
+    glScalef(invS, invS, invS);
     
     // --- RENDER HEAD MESH ---
     glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
@@ -2873,6 +3474,7 @@ void drawCharacter()
     glPushMatrix();
     glTranslatef(charX, CHAR_Y, charZ);  // Move character in world
     glRotatef(charRotation, 0.0f, 1.0f, 0.0f); // Rotate character
+    glScalef(CHARACTER_BODY_SCALE, CHARACTER_BODY_SCALE, CHARACTER_BODY_SCALE); // Apply body scale
 
     if (isShadowPass) {
         // SHADOW OPTIMIZATION: 
@@ -2955,6 +3557,19 @@ void display()
 
     setupLighting(); // Update light intensities
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    
+    // Update projection
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    float aspect = 800.0f / 600.0f;
+    if (isPerspective) {
+        gluPerspective(45.0f, aspect, 0.1f, 200.0f);
+    } else {
+        float size = 3.5f;
+        glOrtho(-size * aspect, size * aspect, -size, size, 0.1f, 200.0f);
+    }
+    glMatrixMode(GL_MODELVIEW);
+
     glLoadIdentity();
 
     updateCamera();

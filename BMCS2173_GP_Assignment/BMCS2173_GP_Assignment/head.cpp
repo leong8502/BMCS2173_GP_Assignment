@@ -1039,4 +1039,58 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
 
 	UnregisterClass(WINDOW_TITLE, wc.hInstance);
 	return true;
+}       float centerAngle = TWO_PI * (i / 8.0f); if (centerAngle > PI * 0.3f && centerAngle < PI * 0.7f) continue;
+        HairPanel hp; hp.tS = centerAngle - 0.15f; hp.tE = centerAngle + 0.15f; hp.pS = PI * 0.01f; hp.pC = PI * 0.22f; hp.wS = 4; hp.lS = 6; hp.nR = 4;
+        hp.tint = rr(i * 137, 0.3f, 0.7f); hp.shade = 0.9f; hp.br = 0; float tl = 0.25f + rr(i * 141, -0.1f, 0.15f);
+        hp.rings[0]={0.04f,0.02f,1,0.01f}; hp.rings[1]={0.05f,0,1,0.03f}; hp.rings[2]={0.06f,-tl*0.35f,0.95f,0.03f}; hp.rings[3]={0.05f,-tl,0.70f,0};
+        drawPanel(hp);
+    }
+}
+
+void drawHairModel() {
+    glDisable(GL_CULL_FACE);
+    drawTopHair(); drawBackHair(); drawBangs();
+}
+
+//--------------------------------
+// [RENDER LOOP] Alignment Adjustments
+//--------------------------------
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); glLoadIdentity();
+    updateCamera(); gluLookAt(cameraX, cameraY, cameraZ, 0, 0.5, 0, 0, 1, 0);
+    setupLighting();
+    
+    // Rotation for Z-up modeling
+    glPushMatrix();
+    glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+    
+    // --- 1. Draw Head (from head4.cpp logic) ---
+    glPushMatrix();
+    glTranslatef(0.0f, 0.0f, 0.2f);
+    drawHeadMesh(); drawEyes(); drawLips();
+    glPopMatrix();
+    
+    // --- 2. Draw Hair (Aligned to head) ---
+    glPushMatrix();
+    // Align hair's local space to the translated head crown
+    glTranslatef(0.0f, 0.0f, 0.25f); 
+    // Applying the 0.85 scaling to the hair ellipsoid to match head mesh scale
+    glScalef(0.85f, 0.85f, 0.85f); 
+    drawHairModel();
+    glPopMatrix();
+    
+    glPopMatrix();
+    SwapBuffers(wglGetCurrentDC());
+}
+
+int WINAPI WinMain(_In_ HINSTANCE hI, _In_opt_ HINSTANCE hP, _In_ LPSTR lpC, _In_ int nC) {
+    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, WindowProcedure, 0, 0, hI, 0, 0, 0, 0, WINDOW_TITLE, 0 };
+    RegisterClassEx(&wc);
+    HWND hWnd = CreateWindow(WINDOW_TITLE, WINDOW_TITLE, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 900, 700, 0, 0, hI, 0);
+    HDC hdc = GetDC(hWnd); initPixelFormat(hdc);
+    HGLRC hglrc = wglCreateContext(hdc); wglMakeCurrent(hdc, hglrc);
+    initOpenGL(); setupLighting(); texSkin = loadBMP("skin.bmp");
+    ShowWindow(hWnd, nC);
+    MSG msg; while (true) { if (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) { if (msg.message == WM_QUIT) break; TranslateMessage(&msg); DispatchMessage(&msg); } display(); }
+    return 0;
 }
