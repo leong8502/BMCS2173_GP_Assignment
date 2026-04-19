@@ -5,23 +5,59 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <algorithm>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
+
+using std::max;
 
 #pragma comment (lib, "OpenGL32.lib")
 #pragma comment (lib, "GLU32.lib")
 #pragma warning(disable:4996)
 
 #define WINDOW_TITLE "Main Character"
+#include "head_geometry_include.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+const float PI = 3.1415926535f;
+const float TWO_PI = 6.283185307f;
+
+struct Vec3 { float x, y, z; };
+struct Vec2 { float u, v; };
+
+struct PanelRing {
+    float offsetOut;
+    float offsetZ;
+    float widthMul;
+    float bulge;
+};
+
+struct HairPanel {
+    float thetaStart, thetaEnd;
+    float phiStart;
+    float phiConform;
+    PanelRing rings[10];
+    int numRings;
+    int widthSegs;
+    int lengthSegs;
+    float colorTint;
+    float colorShade;
+    int bright;
+    float thetaSweep;
+    HairPanel() { thetaSweep = 0.0f; }
+};
 
 //================================
 // Camera variables
 //================================
 
 float cameraAngle = 0.0f;
-float cameraHeight = 2.0f;
+float cameraHeight = 3.5f;
 float cameraDistance = 8.0f;
 float cameraX, cameraY, cameraZ;
 float cameraViewMatrix[16];
@@ -97,7 +133,6 @@ DWORD lastTime = 0;
 //================================
 // Textures
 //================================
-
 GLuint texGrass;        // background ground
 GLuint texSkin;         // body / arm skin
 GLuint texFabric;       // dark-blue fabric
@@ -112,9 +147,525 @@ GLuint texWeaponChain;  // weapon chain
 
 GLuint texFanWood;      // fan wood
 GLuint texFan;          // fan fabric
+GLuint texHeadObj;      // Loaded for head8 head model
 
 // Body uses a display-list cache to avoid repeating heavy procedural math
 GLuint cachedBodyList = 0;
+
+//================================
+// Utility: Math and Head/Hair logic (from head8.cpp)
+//================================
+
+Vec3 v3(float x, float y, float z) { Vec3 v = { x, y, z }; return v; }
+Vec3 v3add(Vec3 a, Vec3 b) { return v3(a.x + b.x, a.y + b.y, a.z + b.z); }
+Vec3 v3sub(Vec3 a, Vec3 b) { return v3(a.x - b.x, a.y - b.y, a.z - b.z); }
+Vec3 v3scale(Vec3 v, float s) { return v3(v.x * s, v.y * s, v.z * s); }
+Vec3 v3cross(Vec3 a, Vec3 b) { return v3(a.y* b.z - a.z * b.y, a.z* b.x - a.x * b.z, a.x* b.y - a.y * b.x); }
+float v3dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+float v3len(Vec3 v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
+Vec3 v3norm(Vec3 v) {
+    float l = v3len(v);
+    if (l < 0.00001f) return v3(0, 1, 0);
+    return v3(v.x / l, v.y / l, v.z / l);
+}
+Vec3 v3lerp(Vec3 a, Vec3 b, float t) { return v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t); }
+
+float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+float smoothstep(float t) { t = clampf(t, 0, 1); return t * t * (3 - 2 * t); }
+
+float catRom(float t, float p0, float p1, float p2, float p3) {
+    float t2 = t * t, t3 = t2 * t;
+    return 0.5f * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+}
+
+Vec3 catRomV(float t, Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) {
+    return v3(catRom(t, p0.x, p1.x, p2.x, p3.x), catRom(t, p0.y, p1.y, p2.y, p3.y), catRom(t, p0.z, p1.z, p2.z, p3.z));
+}
+
+float hf(int s) {
+    s = (s ^ 61) ^ (s >> 16); s += (s << 3); s ^= (s >> 4);
+    s *= 0x27d4eb2d; s ^= (s >> 15);
+    return (float)(s & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+}
+float rr(int s, float lo, float hi) { return lo + hf(s) * (hi - lo); }
+
+// ----------------------------------------------------------------
+// Lighting Configs for Head/Hair (from head8.cpp)
+// ----------------------------------------------------------------
+void setupLightingHead() {
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHT1);
+    glEnable(GL_LIGHT2); // Rim light for high fidelity
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
+    glShadeModel(GL_SMOOTH);
+
+    GLfloat ambientLight[] = { 0.20f, 0.20f, 0.20f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_AMBIENT, ambientLight);
+
+    GLfloat lightPos0[] = { 4.0f, 5.0f, 5.0f, 1.0f };
+    GLfloat white[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+    GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos0);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, black);
+
+    GLfloat lightPos1[] = { -4.0f, 2.0f, -1.0f, 1.0f };
+    GLfloat lightDiff1[] = { 0.3f, 0.3f, 0.4f, 1.0f }; // Soft cool fill
+    glLightfv(GL_LIGHT1, GL_POSITION, lightPos1);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, lightDiff1);
+    
+    GLfloat lightPos2[] = { 0.0f, 5.0f, -5.0f, 1.0f }; // Rim light from behind
+    GLfloat lightDiff2[] = { 0.5f, 0.5f, 0.5f, 1.0f };
+    glLightfv(GL_LIGHT2, GL_POSITION, lightPos2);
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, lightDiff2);
+    
+    GLfloat specColor[] = { 0.15f, 0.15f, 0.15f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_SPECULAR, specColor);
+    glMateriali(GL_FRONT, GL_SHININESS, 16);
+}
+
+void setupLightingHair() {
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHT1);
+    glEnable(GL_LIGHT2);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    glShadeModel(GL_SMOOTH);
+
+    GLfloat amb[] = { 0.30f, 0.30f, 0.38f, 1 };
+    GLfloat kp[] = { 2.5f, 4, 5.5f, 1 };
+    GLfloat kd[] = { 0.85f, 0.85f, 0.92f, 1 };
+    GLfloat ks[] = { 1, 1, 1, 1 };
+    glLightfv(GL_LIGHT0, GL_AMBIENT, amb);
+    glLightfv(GL_LIGHT0, GL_POSITION, kp);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, kd);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, ks);
+
+    GLfloat fp[] = { -3, 1.5f, -2, 1 };
+    GLfloat fd[] = { 0.18f, 0.20f, 0.32f, 1 };
+    glLightfv(GL_LIGHT1, GL_POSITION, fp);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, fd);
+
+    GLfloat rp[] = { 0, 3, -4, 1 };
+    GLfloat rd[] = { 0.22f, 0.28f, 0.42f, 1 };
+    GLfloat rs[] = { 0.5f, 0.6f, 0.85f, 1 };
+    glLightfv(GL_LIGHT2, GL_POSITION, rp);
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, rd);
+    glLightfv(GL_LIGHT2, GL_SPECULAR, rs);
+
+    GLfloat ms[] = { 0.55f, 0.65f, 0.90f, 1 };
+    GLfloat msh[] = { 60 };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, ms);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, msh);
+}
+
+// ----------------------------------------------------------------
+// Hair Model logic (from head8.cpp)
+// ----------------------------------------------------------------
+const float SR_X = 0.48f;
+const float SR_Y = 0.50f;
+const float SR_Z = 0.48f;
+const float SC_Z = 0.38f;
+
+Vec3 skullPt(float theta, float phi) {
+    return v3(SR_X * sinf(phi) * cosf(theta),
+        SR_Y * sinf(phi) * sinf(theta),
+        SC_Z + SR_Z * cosf(phi));
+}
+
+Vec3 skullNrm(float theta, float phi) {
+    Vec3 p = skullPt(theta, phi);
+    return v3norm(v3(p.x / (SR_X * SR_X), p.y / (SR_Y * SR_Y), (p.z - SC_Z) / (SR_Z * SR_Z)));
+}
+
+void emitQ(Vec3 p0, Vec3 n0, Vec3 p1, Vec3 n1, Vec3 p2, Vec3 n2, Vec3 p3, Vec3 n3) {
+    glBegin(GL_QUADS);
+    glNormal3f(n0.x, n0.y, n0.z); glVertex3f(p0.x, p0.y, p0.z);
+    glNormal3f(n1.x, n1.y, n1.z); glVertex3f(p1.x, p1.y, p1.z);
+    glNormal3f(n2.x, n2.y, n2.z); glVertex3f(p2.x, p2.y, p2.z);
+    glNormal3f(n3.x, n3.y, n3.z); glVertex3f(p3.x, p3.y, p3.z);
+    glEnd();
+}
+
+void setHairColorGradient(float shade, float tint, float v, int bright) {
+    float rTop = 0.05f, gTop = 0.12f, bTop = 0.55f;
+    float rBot = 0.35f, gBot = 0.08f, bBot = 0.50f;
+    if (bright) {
+        rTop *= 1.30f; gTop *= 1.30f; bTop *= 1.30f;
+        rBot *= 1.30f; gBot *= 1.30f; bBot *= 1.30f;
+    }
+    float r = rTop + (rBot - rTop) * v;
+    float g = gTop + (gBot - gTop) * v;
+    float b = bTop + (bBot - bTop) * v;
+    r += tint * 0.05f; g += tint * 0.05f; b += tint * 0.05f;
+    glColor3f(r * shade, g * shade, b * shade);
+}
+
+void drawPanel(const HairPanel& hp) {
+    int wSegs = hp.widthSegs;
+    int lSegs = hp.lengthSegs;
+    int cols = wSegs + 1;
+    int rows = lSegs + 1;
+    Vec3* pts = new Vec3[rows * cols];
+    Vec3* nrm = new Vec3[rows * cols];
+    for (int r = 0; r < rows; ++r) {
+        float v = (float)r / (float)lSegs;
+        float globalR = v * (float)(hp.numRings - 1);
+        int ri = (int)globalR;
+        if (ri >= hp.numRings - 1) ri = hp.numRings - 2;
+        float rt = globalR - (float)ri;
+        int r0 = (ri - 1 < 0) ? 0 : ri - 1;
+        int r1 = ri;
+        int r2 = (ri + 1 >= hp.numRings) ? hp.numRings - 1 : ri + 1;
+        int r3 = (ri + 2 >= hp.numRings) ? hp.numRings - 1 : ri + 2;
+        float oOut = catRom(rt, hp.rings[r0].offsetOut, hp.rings[r1].offsetOut, hp.rings[r2].offsetOut, hp.rings[r3].offsetOut);
+        float oZ = catRom(rt, hp.rings[r0].offsetZ, hp.rings[r1].offsetZ, hp.rings[r2].offsetZ, hp.rings[r3].offsetZ);
+        float wMul = catRom(rt, hp.rings[r0].widthMul, hp.rings[r1].widthMul, hp.rings[r2].widthMul, hp.rings[r3].widthMul);
+        float bulge = catRom(rt, hp.rings[r0].bulge, hp.rings[r1].bulge, hp.rings[r2].bulge, hp.rings[r3].bulge);
+        for (int c = 0; c < cols; ++c) {
+            float u = (float)c / (float)wSegs;
+            float theta = hp.thetaStart + (hp.thetaEnd - hp.thetaStart) * u;
+            float centerTheta = (hp.thetaStart + hp.thetaEnd) * 0.5f;
+            theta = centerTheta + (theta - centerTheta) * wMul;
+            theta += hp.thetaSweep * v * v;
+            float phi = hp.phiStart + hp.phiConform * clampf(v * 1.5f, 0, 1);
+            Vec3 sp = skullPt(theta, phi);
+            Vec3 sn = skullNrm(theta, phi);
+            float edgeFade = 1.0f - 2.0f * fabsf(u - 0.5f);
+            float bulgeFactor = bulge * edgeFade * edgeFade;
+            Vec3 p = v3add(sp, v3scale(sn, oOut + bulgeFactor));
+            p.z += oZ;
+            pts[r * cols + c] = p;
+        }
+    }
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            int idx = r * cols + c;
+            Vec3 center = pts[idx];
+            Vec3 du, dv;
+            if (c < cols - 1) du = v3sub(pts[idx + 1], center);
+            else du = v3sub(center, pts[idx - 1]);
+            if (r < rows - 1) dv = v3sub(pts[(r + 1) * cols + c], center);
+            else dv = v3sub(center, pts[(r - 1) * cols + c]);
+            nrm[idx] = v3norm(v3cross(du, dv));
+        }
+    }
+    for (int r = 0; r < lSegs; ++r) {
+        float v = (float)r / (float)lSegs;
+        float shade = hp.colorShade * (1.0f - 0.30f * v);
+        setHairColorGradient(shade, hp.colorTint, v, hp.bright);
+        for (int c = 0; c < wSegs; ++c) {
+            int i00 = r * cols + c;
+            int i10 = r * cols + c + 1;
+            int i01 = (r + 1) * cols + c;
+            int i11 = (r + 1) * cols + c + 1;
+            emitQ(pts[i00], nrm[i00], pts[i10], nrm[i10], pts[i11], nrm[i11], pts[i01], nrm[i01]);
+            Vec3 fn00 = v3scale(nrm[i00], -1); Vec3 fn10 = v3scale(nrm[i10], -1);
+            Vec3 fn11 = v3scale(nrm[i11], -1); Vec3 fn01 = v3scale(nrm[i01], -1);
+            float bshade = shade * 0.40f;
+            setHairColorGradient(bshade, hp.colorTint, v, hp.bright);
+            emitQ(pts[i01], fn01, pts[i11], fn11, pts[i10], fn10, pts[i00], fn00);
+            setHairColorGradient(shade, hp.colorTint, v, hp.bright);
+        }
+    }
+    delete[] pts; delete[] nrm;
+}
+
+void drawBackHair() {
+    const int numPanels = 10;
+    for (int i = 0; i < numPanels; ++i) {
+        float centerAngle = PI * 1.5f + PI * 0.85f * ((float)i / (numPanels - 1) - 0.5f);
+        float halfWidth = PI / (float)numPanels * 1.5f;
+        HairPanel hp;
+        hp.thetaStart = centerAngle - halfWidth; hp.thetaEnd = centerAngle + halfWidth;
+        hp.phiStart = PI * 0.12f + rr(i * 31, 0, 0.03f);
+        hp.phiConform = PI * 0.40f + rr(i * 37, -0.05f, 0.05f);
+        hp.widthSegs = 4; hp.lengthSegs = 10;
+        hp.colorTint = rr(i * 41, 0.0f, 0.8f);
+        hp.colorShade = 0.85f + rr(i * 43, 0, 0.15f);
+        hp.bright = 0;
+        float depthVar = rr(i * 47, 0, 0.02f);
+        float totalDrop = 1.4f + rr(i * 53, -0.15f, 0.20f);
+        hp.numRings = 8;
+        hp.rings[0] = { 0.04f + depthVar, 0.0f,    1.0f,  0.02f };
+        hp.rings[1] = { 0.05f + depthVar, -0.05f,   1.0f,  0.04f };
+        hp.rings[2] = { 0.08f + depthVar, -0.18f,   0.95f, 0.05f };
+        hp.rings[3] = { 0.05f + depthVar, -0.38f,   0.88f, 0.04f };
+        hp.rings[4] = { 0.12f + depthVar, -0.60f,   0.78f, 0.03f };
+        hp.rings[5] = { 0.06f + depthVar, -0.85f,   0.65f, 0.02f };
+        hp.rings[6] = { 0.12f + depthVar, -totalDrop * 0.88f, 0.40f, 0.01f };
+        hp.rings[7] = { 0.02f + depthVar, -totalDrop + 0.08f, 0.20f, 0.00f };
+        drawPanel(hp);
+    }
+}
+
+void drawSideHair() {
+    for (int side = 0; side < 2; ++side) {
+        const int numPanels = 8;
+        for (int i = 0; i < numPanels; ++i) {
+            float baseAngle = (side == 0) ? (PI * 0.0f) : (PI * 1.0f);
+            float centerAngle = baseAngle + PI * 0.40f * ((float)i / (numPanels - 1) - 0.5f);
+            float halfWidth = PI / (float)(numPanels) * 0.8f;
+            HairPanel hp;
+            hp.thetaStart = centerAngle - halfWidth; hp.thetaEnd = centerAngle + halfWidth;
+            hp.phiStart = PI * 0.04f + rr(i * 59 + side * 500, 0, 0.04f);
+            hp.phiConform = PI * 0.38f + rr(i * 61 + side * 500, -0.04f, 0.04f);
+            hp.widthSegs = 5; hp.lengthSegs = 14;
+            hp.colorTint = rr(i * 67 + side * 500, 0.1f, 0.9f);
+            hp.colorShade = 0.90f + rr(i * 71 + side * 500, 0, 0.10f);
+            hp.bright = 0;
+            float dv = rr(i * 73 + side * 500, 0, 0.02f);
+            float totalDrop = 1.25f + rr(i * 79 + side * 500, -0.15f, 0.25f);
+            hp.numRings = 7;
+            hp.rings[0] = { 0.04f + dv, 0.0f,   1.0f,  0.03f }; hp.rings[1] = { 0.06f + dv, -0.06f,  1.0f,  0.05f };
+            hp.rings[2] = { 0.10f + dv, -0.22f,  0.92f, 0.04f }; hp.rings[3] = { 0.05f + dv, -0.45f,  0.82f, 0.03f };
+            hp.rings[4] = { 0.12f + dv, -0.72f,  0.68f, 0.02f }; hp.rings[5] = { 0.05f + dv, -totalDrop * 0.85f, 0.42f, 0.01f };
+            hp.rings[6] = { 0.10f + dv, -totalDrop,         0.18f, 0.00f };
+            drawPanel(hp);
+        }
+    }
+}
+
+void drawBangs() {
+    const int numBangs = 16;
+    for (int i = 0; i < numBangs; ++i) {
+        float t = (float)i / (numBangs - 1);
+        float centerAngle = PI * 0.5f + PI * 0.22f * (t - 0.5f);
+        float halfWidth = PI * 0.035f; 
+        HairPanel hp;
+        hp.thetaStart = centerAngle - halfWidth; hp.thetaEnd = centerAngle + halfWidth;
+        hp.phiStart = PI * 0.02f; hp.phiConform = PI * 0.22f;
+        hp.widthSegs = 4; hp.lengthSegs = 10;
+        hp.colorTint = 0.2f + 0.1f * sinf(t * PI * 6.0f);
+        hp.colorShade = 0.88f + 0.04f * sinf(t * PI * 4.0f);
+        hp.bright = 0;
+        float midDist = fabsf(t - 0.5f);
+        float bangLen = (midDist < 0.2f) ? (0.30f + 0.6f * midDist) : (0.42f - 0.20f * (midDist - 0.2f));
+        hp.thetaSweep = (t - 0.5f) * 1.5f;
+        hp.numRings = 5;
+        hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f }; hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
+        hp.rings[2] = { 0.10f, -bangLen * 0.4f,  0.90f, 0.02f }; hp.rings[3] = { 0.08f, -bangLen * 0.8f,  0.60f, 0.01f };
+        hp.rings[4] = { 0.03f, -bangLen,          0.15f, 0.00f }; 
+        drawPanel(hp);
+    }
+}
+
+void drawTopHair() {
+    const int numPanels = 8;
+    for (int i = 0; i < numPanels; ++i) {
+        float centerAngle = TWO_PI * ((float)i / numPanels);
+        float halfWidth = PI / (float)numPanels * 1.6f;
+        if (centerAngle > PI * 0.3f && centerAngle < PI * 0.7f) continue;
+        HairPanel hp;
+        hp.thetaStart = centerAngle - halfWidth; hp.thetaEnd = centerAngle + halfWidth;
+        hp.phiStart = PI * 0.01f; hp.phiConform = PI * 0.22f;
+        hp.widthSegs = 4; hp.lengthSegs = 6;
+        hp.colorTint = rr(i * 137, 0.3f, 0.7f);
+        hp.colorShade = 0.90f + rr(i * 139, 0, 0.10f);
+        hp.bright = 0;
+        float topLen = 0.25f + rr(i * 141, -0.10f, 0.15f);
+        hp.numRings = 4;
+        hp.rings[0] = { 0.04f, 0.02f,  1.0f,  0.01f }; hp.rings[1] = { 0.05f, 0.0f,   1.0f,  0.03f };
+        hp.rings[2] = { 0.06f, -topLen * 0.35f,  0.95f, 0.03f }; hp.rings[3] = { 0.05f, -topLen,          0.70f, 0.00f };
+        drawPanel(hp);
+    }
+}
+
+void drawAccentStrands() {
+    const int numStrands = 12;
+    for (int i = 0; i < numStrands; ++i) {
+        float angle = PI * 1.0f + PI * 1.0f * hf(i * 149);
+        float halfWidth = PI * 0.03f + rr(i * 151, 0, 0.015f);
+        HairPanel hp;
+        hp.thetaStart = angle - halfWidth; hp.thetaEnd = angle + halfWidth;
+        hp.phiStart = PI * 0.04f + rr(i * 157, 0, 0.04f);
+        hp.phiConform = PI * 0.35f + rr(i * 163, -0.04f, 0.04f);
+        hp.widthSegs = 2; hp.lengthSegs = 8;
+        hp.colorTint = rr(i * 167, 0, 1);
+        hp.colorShade = 0.80f + rr(i * 173, 0, 0.20f);
+        hp.bright = (hf(i * 179) > 0.6f) ? 1 : 0;
+        float strandLen = 0.8f + rr(i * 181, -0.2f, 0.5f);
+        float dv = rr(i * 191, 0, 0.02f);
+        hp.numRings = 5;
+        hp.rings[0] = { 0.055f + dv, 0.0f,   1.0f,  0.01f }; hp.rings[1] = { 0.065f + dv, -0.06f,  1.0f,  0.02f };
+        hp.rings[2] = { 0.075f + dv, -0.30f,  0.75f, 0.01f }; hp.rings[3] = { 0.06f + dv,  -strandLen * 0.8f, 0.40f, 0.00f };
+        hp.rings[4] = { 0.04f + dv,  -strandLen + 0.06f, 0.15f, 0.00f };
+        drawPanel(hp);
+    }
+}
+
+void drawLayerStrands() {
+    const int numPanels = 10;
+    for (int i = 0; i < numPanels; ++i) {
+        float angle = PI * 1.0f + PI * 1.0f * ((float)i / (numPanels - 1));
+        float halfWidth = PI * 0.04f + rr(i * 233, 0, 0.02f);
+        HairPanel hp;
+        hp.thetaStart = angle - halfWidth; hp.thetaEnd = angle + halfWidth;
+        hp.phiStart = PI * 0.06f + rr(i * 239, 0, 0.04f);
+        hp.phiConform = PI * 0.36f + rr(i * 241, -0.04f, 0.04f);
+        hp.widthSegs = 2; hp.lengthSegs = 8;
+        hp.colorTint = rr(i * 251, 0, 1);
+        hp.colorShade = 0.82f + rr(i * 257, 0, 0.18f);
+        hp.bright = (hf(i * 263) > 0.5f) ? 1 : 0;
+        float totalDrop = 1.1f + rr(i * 269, -0.2f, 0.3f);
+        float dv = rr(i * 271, 0, 0.015f);
+        hp.numRings = 6;
+        hp.rings[0] = { 0.05f + dv, 0.0f,   1.0f,  0.015f }; hp.rings[1] = { 0.06f + dv, -0.05f,  1.0f,  0.025f };
+        hp.rings[2] = { 0.07f + dv, -0.22f,  0.85f, 0.02f }; hp.rings[3] = { 0.08f + dv, -0.50f,  0.65f, 0.01f };
+        hp.rings[4] = { 0.06f + dv, -totalDrop * 0.88f, 0.35f, 0.005f }; hp.rings[5] = { 0.04f + dv, -totalDrop + 0.06f,  0.15f, 0.00f };
+        drawPanel(hp);
+    }
+}
+
+void drawRabbitEars() {
+    glDisable(GL_TEXTURE_2D); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        glTranslatef(side * 0.14f, 0.04f, 0.88f);
+        glRotatef(side * 18.0f, 0, 1, 0); glRotatef(-8.0f, 1, 0, 0);
+        const int stacks = 50; const int slices = 36; float height = 0.70f;
+        for (int i = 0; i < stacks; i++) {
+            float f1 = (float)i / stacks; float f2 = (float)(i + 1) / stacks;
+            float z1 = f1 * height; float z2 = f2 * height;
+            float peakPos = 0.60f; float maxWidth = 0.15f;
+            float earWidth1 = (f1 < peakPos) ? (maxWidth * (0.35f + 0.65f * powf(f1 / peakPos, 0.7f))) : (maxWidth * (0.30f + 0.70f * cosf((f1 - peakPos) / (1.0f - peakPos) * 3.14159f * 0.5f)));
+            float earWidth2 = (f2 < peakPos) ? (maxWidth * (0.35f + 0.65f * powf(f2 / peakPos, 0.7f))) : (maxWidth * (0.30f + 0.70f * cosf((f2 - peakPos) / (1.0f - peakPos) * 3.14159f * 0.5f)));
+            float curve1 = 0.12f * f1 * f1; float curve2 = 0.12f * f2 * f2;
+            float thick1 = 0.035f * sinf(f1 * 3.14159f * 0.85f + 0.15f); float thick2 = 0.035f * sinf(f2 * 3.14159f * 0.85f + 0.15f);
+            if (i == stacks - 1) {
+                glBegin(GL_TRIANGLE_FAN); glColor3f(1.0f, 1.0f, 1.0f); glNormal3f(0, 0, 1); glVertex3f(0, -curve2 - 0.005f, z2 + earWidth2 * 0.4f);
+                for (int j = 0; j <= slices; j++) {
+                    float th = (float)j / slices * TWO_PI;
+                    glNormal3f(cosf(th) * 0.3f, sinf(th) * 0.3f, 0.9f); glVertex3f(earWidth1 * cosf(th), thick1 * sinf(th) - curve1, z1);
+                }
+                glEnd();
+            } else {
+                glBegin(GL_QUAD_STRIP);
+                for (int j = 0; j <= slices; j++) {
+                    float th = (float)j / slices * TWO_PI; float cosTh = cosf(th); float sinTh = sinf(th);
+                    float faceFactor = max(0.0f, sinTh - 0.50f) / 0.50f;
+                    float hFact = clampf(f1 * 4.0f, 0, 1) * clampf((1.0f - f1) * 3.0f, 0, 1);
+                    float pinkIntensity = faceFactor * hFact;
+                    glColor3f(1.0f, 1.0f - 0.30f * pinkIntensity, 1.0f - 0.22f * pinkIntensity);
+                    float depthMul = 1.0f - 0.55f * pinkIntensity;
+                    glNormal3f(cosTh, sinTh * (1.0f - 0.7f * pinkIntensity), 0.15f);
+                    glVertex3f(earWidth2 * cosTh, thick2 * depthMul * sinTh - curve2, z2);
+                    glVertex3f(earWidth1 * cosTh, thick1 * depthMul * sinTh - curve1, z1);
+                }
+                glEnd();
+            }
+        }
+        glPopMatrix();
+    }
+    glDisable(GL_BLEND); glEnable(GL_TEXTURE_2D);
+}
+
+void drawEarrings() {
+    glDisable(GL_TEXTURE_2D);
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        glTranslatef(side * 0.37f, -0.02f, 0.15f);
+        int slides = 12; float rTop = 0.015f, rBot = 0.035f; float zTop = 0.0f, zBot = -0.10f;
+        glColor3f(0.9f, 0.75f, 0.2f);
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= slides; i++) {
+            float th = (float)i / slides * TWO_PI; float ct = cosf(th), st = sinf(th);
+            glNormal3f(ct, st, 0.2f); glVertex3f(rBot * ct, rBot * st, zBot); glVertex3f(rTop * ct, rTop * st, zTop);
+        }
+        glEnd();
+        glColor3f(0.95f, 0.95f, 0.95f);
+        float tTop = zBot, tBot = -0.18f; float rtTop = 0.025f, rtBot = 0.005f;
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= slides; i++) {
+            float th = (float)i / slides * TWO_PI; float ct = cosf(th), st = sinf(th);
+            glNormal3f(ct, st, 0.1f); glVertex3f(rtBot * ct, rtBot * st, tBot); glVertex3f(rtTop * ct, rtTop * st, tTop);
+        }
+        glEnd();
+        glPopMatrix();
+    }
+}
+
+void drawHeadpiece() {
+    glDisable(GL_CULL_FACE); glDisable(GL_TEXTURE_2D);
+    glPushMatrix();
+    glTranslatef(0.0f, 0.42f, 0.81f); glRotatef(35.0f, 1.0f, 0.0f, 0.0f);
+    auto drawGem = [](float scaleX, float scaleY, float r, float g, float b, bool pointDown=false) {
+        glColor3f(r, g, b); glBegin(GL_TRIANGLE_FAN); glNormal3f(0, 1, 0); glVertex3f(0, 0.03f, 0);
+        int pts = 16;
+        for (int i = 0; i <= pts; i++) {
+            float th = (float)i / pts * TWO_PI; float st = sinf(th), ct = cosf(th);
+            if (pointDown) { if (st < 0) st *= 1.5f; } else { if (st > 0) st *= 1.5f; }
+            float nx = ct, ny = 0.5f, nz = st; float len = sqrtf(nx*nx + ny*ny + nz*nz);
+            glNormal3f(nx/len, ny/len, nz/len); glVertex3f(ct * scaleX, 0, st * scaleY);
+        }
+        glEnd();
+    };
+    drawGem(0.05f, 0.07f, 0.85f, 0.70f, 0.15f, true);
+    glTranslatef(0.0f, 0.005f, 0.0f); drawGem(0.03f, 0.05f, 0.1f, 0.7f, 1.0f, true);
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix(); glTranslatef(side * 0.08f, 0.0f, 0.04f); glRotatef(side * -45.0f, 0.0f, 0.0f, 1.0f);
+        drawGem(0.06f, 0.13f, 0.85f, 0.70f, 0.15f, false);
+        glTranslatef(0.0f, 0.005f, 0.0f); drawGem(0.04f, 0.10f, 0.1f, 0.7f, 1.0f, false);
+        glPopMatrix();
+    }
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix(); glTranslatef(side * 0.18f, -0.015f, 0.02f); glRotatef(side * -20.0f, 0.0f, 0.0f, 1.0f); 
+        drawGem(0.035f, 0.05f, 0.85f, 0.70f, 0.15f, false);
+        glTranslatef(0.0f, 0.005f, 0.0f); drawGem(0.02f, 0.035f, 0.1f, 0.7f, 1.0f, false);
+        glPopMatrix();
+    }
+    glPopMatrix();
+    glColor3f(0.85f, 0.70f, 0.15f); glPushMatrix(); glTranslatef(0.0f, 0.45f, 0.76f); glRotatef(25.0f, 1.0f, 0.0f, 0.0f);
+    glBegin(GL_QUAD_STRIP); int bandSegs = 20;
+    for (int i = 0; i <= bandSegs; i++) {
+        float t = (float)i / bandSegs; float a = t * PI;
+        float x = -0.28f * cosf(a), y = -0.10f * sinf(a), z = -0.08f * sinf(a);
+        float thick = 0.025f * sinf(a); float centerDist = fabsf(t - 0.5f);
+        if(centerDist < 0.10f) z -= 0.04f * (0.10f - centerDist) / 0.10f; 
+        glNormal3f(0, 1, 0.3f); glVertex3f(x, y, z - 0.015f); glVertex3f(x, y, z + thick + 0.015f);
+    }
+    glEnd(); glPopMatrix();
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix(); glTranslatef(side * 0.20f, 0.39f, 0.70f);
+        int segments = 16;
+        for (int i = 0; i < segments; i++) {
+            float t1 = (float)i / segments; float t2 = (float)(i+1) / segments;
+            float h1X = (side * 1.0f) * (0.16f * t1 + 0.03f * t1 * t1), h1Y = -0.05f * t1 - 0.1f * t1 * t1, h1Z = 0.08f * t1 + 0.12f * t1 * t1;
+            float r1 = 0.02f * (1.1f - t1) * (1.0f - 0.2f*t1);
+            float h2X = (side * 1.0f) * (0.16f * t2 + 0.03f * t2 * t2), h2Y = -0.05f * t2 - 0.1f * t2 * t2, h2Z = 0.08f * t2 + 0.12f * t2 * t2;
+            float r2 = 0.02f * (1.1f - t2) * (1.0f - 0.2f*t2);
+            glBegin(GL_QUAD_STRIP);
+            for (int k = 0; k <= 6; k++) { 
+                float a = (float)k / 6.0f * TWO_PI; float ct = cosf(a), st = sinf(a);
+                glNormal3f(ct, 0.3f, st); glVertex3f(h2X + ct * r2, h2Y, h2Z + st * r2); glVertex3f(h1X + ct * r1, h1Y, h1Z + st * r1);
+            }
+            glEnd();
+        }
+        for (int i = 0; i < segments; i++) {
+            float t1 = (float)i / segments; float t2 = (float)(i+1) / segments;
+            float h1X = (side * 1.0f) * (0.12f * t1 + 0.05f * t1 * t1), h1Y = -0.05f * t1, h1Z = -0.05f * t1 - 0.05f * t1 * t1;
+            float r1 = 0.015f * (1.1f - t1);
+            float h2X = (side * 1.0f) * (0.12f * t2 + 0.05f * t2 * t2), h2Y = -0.05f * t2, h2Z = -0.05f * t2 - 0.05f * t2 * t2;
+            float r2 = 0.015f * (1.1f - t2);
+            glBegin(GL_QUAD_STRIP);
+            for (int k = 0; k <= 6; k++) {
+                float a = (float)k / 6.0f * TWO_PI; float ct = cosf(a), st = sinf(a);
+                glNormal3f(ct, 0.3f, st); glVertex3f(h2X + ct * r2, h2Y, h2Z + st * r2); glVertex3f(h1X + ct * r1, h1Y, h1Z + st * r1);
+            }
+            glEnd();
+        }
+        glPopMatrix();
+    }
+}
+
+void drawHairModel() {
+    glDisable(GL_CULL_FACE);
+    drawRabbitEars(); drawHeadpiece(); drawEarrings();
+    drawTopHair(); drawBackHair(); drawSideHair(); drawLayerStrands(); drawBangs(); drawAccentStrands();
+}
 
 //================================
 // Utility: load a BMP texture
@@ -176,9 +727,9 @@ void updateCamera()
 void resetAll()
 {
     cameraAngle    = 0.0f;
-    cameraHeight   = 2.0f;
+    cameraHeight   = 3.5f;
     cameraDistance = 8.0f;
-    cameraX = 0.0f; cameraY = 2.0f; cameraZ = 8.0f;
+    cameraX = 0.0f; cameraY = 3.5f; cameraZ = 8.0f;
 
     leftArmAngle  = 0.0f; rightArmAngle = 0.0f;
     leftLegAngle  = 0.0f; rightLegAngle = 0.0f;
@@ -2255,6 +2806,68 @@ void drawPlanarShadow()
 // We lift the entire character group so feet rest on Y = 0.
 #define CHAR_Y 1.92f
 
+void drawHeadAndHair() {
+    glPushMatrix();
+    // 1. Position at the manually adjusted neck location
+    glTranslatef(0.0f, 0.2f, 1.85f); 
+    
+    // --- RENDER HEAD MESH ---
+    glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
+    glDisable(GL_BLEND); 
+    if (!isShadowPass) setupLightingHead();
+    
+    glPushMatrix();
+    // Orient head mesh: Face camera (Torso Z-up -> Head.obj Y-up)
+    glRotatef(90.0f, 1.0f, 0.0f, 0.0f); 
+    glRotatef(180.0f, 0.0f, 1.0f, 0.0f); 
+
+    // Proportional scaling for adult aesthetic
+    glScalef(0.135f, 0.162f, 0.145f);
+    
+    // Internal base model offset (centers the mesh)
+    glTranslatef(0.0f, -0.2f, -0.5f);
+
+    if (!isWireframe && !isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texHeadObj);
+        glColor3f(1.0f, 1.0f, 1.0f);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+        // During shadows, we use the shadow color set by drawPlanarShadow()
+    }
+    
+    drawHeadOBJGeometry();
+    glPopMatrix();
+    glPopAttrib();
+
+    // --- RENDER HAIR SYSTEM ---
+    // Removed isShadowPass guard to allow hair to cast shadows
+    glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_CURRENT_BIT);
+    if (!isShadowPass) setupLightingHair();
+    
+    glPushMatrix();
+    // PULLED DOWN: Seating the hair firmly on the forehead mesh (Z-UP)
+    // Adjusting offset to pull the procedural skull (internal Z=0.38) onto the head
+    glTranslatef(0.0f, -0.15f, -0.15f); 
+
+    // Orientation: Face the same way as the mesh head
+    // Changed to 0 degrees to align hair front with face front
+    glRotatef(0.0f, 0.0f, 0.0f, 1.0f); 
+    
+    glScalef(0.80f, 0.85f, 0.85f);
+    
+    glDisable(GL_TEXTURE_2D);
+    if (isWireframe) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    }
+    
+    drawHairModel();
+    glPopMatrix();
+    glPopAttrib();
+
+    glPopMatrix();
+}
+
 void drawCharacter()
 {
     glPushMatrix();
@@ -2270,7 +2883,8 @@ void drawCharacter()
         glPushMatrix();
         glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
         glRotatef(180.0f, 0.0f, 0.0f, 1.0f); 
-        drawBodyMesh(); // Very fast torso and head
+        drawBodyMesh(); // Torso
+        drawHeadAndHair(); // Head shadow proxy
         
         // Super-fast cone to represent the dress skirt
         GLUquadric* q = gluNewQuadric();
@@ -2294,12 +2908,9 @@ void drawCharacter()
         glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
         glRotatef(180.0f, 0.0f, 0.0f, 1.0f); // Reverse body direction to face camera
         if (isWireframe) {
-            // In wireframe mode, bypass the cached display list.
-            // The list has glEnable(GL_TEXTURE_2D) baked in from compile-time,
-            // which would silently re-enable textures and ruin the wireframe color.
             drawBodyMesh();
             drawDressMesh();
-            glDisable(GL_TEXTURE_2D); // drawDressMesh re-enables at end; undo it
+            drawHeadAndHair();
         } else if (cachedBodyList == 0) {
             cachedBodyList = glGenLists(1);
             glNewList(cachedBodyList, GL_COMPILE);
@@ -2307,8 +2918,10 @@ void drawCharacter()
             drawDressMesh();
             glEndList();
             glCallList(cachedBodyList);
+            drawHeadAndHair();
         } else {
             glCallList(cachedBodyList);
+            drawHeadAndHair();
         }
         glPopMatrix();
 
@@ -2354,7 +2967,7 @@ void display()
     }
 
     gluLookAt(cameraX + charX + shakeX, cameraY + shakeY, cameraZ + charZ + shakeZ,
-              charX + shakeX, 1.2 + shakeY, charZ + shakeZ,   // look at character chest height
+              charX + shakeX, 1.6 + shakeY, charZ + shakeZ,   // look at character neck/head height
               0, 1, 0);
 
     // Save camera orientation for world-aligned weapons
@@ -2445,6 +3058,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
     texWeaponChain  = loadBMP("chain.bmp");
     texFanWood      = loadBMP("fan_wood.bmp");
     texFan          = loadBMP("fan.bmp");
+    texHeadObj      = loadBMP("head.bmp");
 
     ShowWindow(hWnd, nCmdShow);
 
