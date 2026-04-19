@@ -40,6 +40,7 @@ float attackAngle = 0.0f;
 //--------------------------------
 
 int outfitColor = 1;
+bool isWireframe = false;
 
 //--------------------------------
 // Folding Animation
@@ -122,6 +123,11 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		case '5': // Key 5
 			isFanFolded = !isFanFolded;
 			targetSpreadAngle = isFanFolded ? 0.0f : 140.0f;
+			break;
+
+		case 'I':
+		case 'i':
+			isWireframe = !isWireframe;
 			break;
 
 		//--------------------------------
@@ -576,6 +582,12 @@ void display()
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glLoadIdentity();
+
+	if (isWireframe) {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	} else {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	}
 
 	updateCamera();
 

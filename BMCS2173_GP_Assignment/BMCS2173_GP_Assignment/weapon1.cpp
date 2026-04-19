@@ -28,6 +28,7 @@ float cameraX, cameraY, cameraZ;
 //--------------------------------
 
 float spinAngle = 0.0f;
+bool isWireframe = false;
 
 //--------------------------------
 // Texture
@@ -70,6 +71,11 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 		case VK_SPACE:
 			resetAll();
+			break;
+
+		case 'I':
+		case 'i':
+			isWireframe = !isWireframe;
 			break;
 
 		case VK_LEFT:
@@ -430,6 +436,12 @@ void display()
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glLoadIdentity();
+
+	if (isWireframe) {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	} else {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	}
 
 	updateCamera();
 
