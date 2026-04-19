@@ -325,18 +325,26 @@ void emitT(Vec3 p0, Vec3 n0, Vec3 p1, Vec3 n1, Vec3 p2, Vec3 n2) {
     glEnd();
 }
 
-void setHairColor(float shade, float tint) {
-    float r = (0.10f + 0.10f * tint) * shade;
-    float g = (0.35f + 0.20f * tint) * shade;
-    float b = (0.85f + 0.15f * tint) * shade;
-    glColor3f(r, g, b);
-}
+void setHairColorGradient(float shade, float tint, float v, int bright) {
+    // Dark Blue to Dark Purple gradient
+    float rTop = 0.05f, gTop = 0.12f, bTop = 0.55f;
+    float rBot = 0.35f, gBot = 0.08f, bBot = 0.50f;
 
-void setHairColorBright(float shade, float tint) {
-    float r = (0.25f + 0.15f * tint) * shade;
-    float g = (0.55f + 0.20f * tint) * shade;
-    float b = (1.0f  + 0.0f  * tint) * shade;
-    glColor3f(r, g, b);
+    if (bright) {
+        rTop *= 1.30f; gTop *= 1.30f; bTop *= 1.30f;
+        rBot *= 1.30f; gBot *= 1.30f; bBot *= 1.30f;
+    }
+
+    float r = rTop + (rBot - rTop) * v;
+    float g = gTop + (gBot - gTop) * v;
+    float b = bTop + (bBot - bTop) * v;
+
+    // Soft variations based on tint
+    r += tint * 0.05f;
+    g += tint * 0.05f;
+    b += tint * 0.05f;
+
+    glColor3f(r * shade, g * shade, b * shade);
 }
 
 struct PanelRing {
@@ -429,8 +437,7 @@ void drawPanel(const HairPanel& hp) {
         float v = (float)r / (float)lSegs;
         float shade = hp.colorShade * (1.0f - 0.30f * v);
 
-        if (hp.bright) setHairColorBright(shade, hp.colorTint);
-        else setHairColor(shade, hp.colorTint);
+        setHairColorGradient(shade, hp.colorTint, v, hp.bright);
 
         for (int c = 0; c < wSegs; ++c) {
             int i00 = r * cols + c;
@@ -444,12 +451,10 @@ void drawPanel(const HairPanel& hp) {
             Vec3 fn11 = v3scale(nrm[i11], -1);
             Vec3 fn01 = v3scale(nrm[i01], -1);
             float bshade = shade * 0.40f;
-            if (hp.bright) setHairColorBright(bshade, hp.colorTint);
-            else setHairColor(bshade, hp.colorTint);
+            setHairColorGradient(bshade, hp.colorTint, v, hp.bright);
             emitQ(pts[i01], fn01, pts[i11], fn11, pts[i10], fn10, pts[i00], fn00);
 
-            if (hp.bright) setHairColorBright(shade, hp.colorTint);
-            else setHairColor(shade, hp.colorTint);
+            setHairColorGradient(shade, hp.colorTint, v, hp.bright);
         }
     }
 
@@ -531,97 +536,44 @@ void drawSideHair() {
 }
 
 void drawBangs() {
-    // 1. Middle V-shape bangs (covers forehead)
-    const int numMid = 8;
-    for (int i = 0; i < numMid; ++i) {
-        float t = (float)i / (numMid - 1); 
-        float centerAngle = PI * 0.5f + PI * 0.14f * (t - 0.5f); // Spread across forehead
-        float halfWidth = PI * 0.04f; 
+    // M-shape natural bangs
+    const int numBangs = 16;
+    for (int i = 0; i < numBangs; ++i) {
+        float t = (float)i / (numBangs - 1); // 0 to 1
+        float centerAngle = PI * 0.5f + PI * 0.22f * (t - 0.5f); // Spread across forehead
+        float halfWidth = PI * 0.035f; 
 
         HairPanel hp;
         hp.thetaStart = centerAngle - halfWidth;
         hp.thetaEnd = centerAngle + halfWidth;
-        hp.phiStart = PI * 0.01f + rr(i * 83, 0, 0.01f);
-        hp.phiConform = PI * 0.22f + rr(i * 89, -0.01f, 0.01f);
+        hp.phiStart = PI * 0.02f;
+        hp.phiConform = PI * 0.22f;
         hp.widthSegs = 4;
         hp.lengthSegs = 10;
-        hp.colorTint = rr(i * 97, 0.2f, 0.6f);
-        hp.colorShade = 0.85f + rr(i * 101, 0, 0.10f);
+        hp.colorTint = 0.2f + 0.1f * sinf(t * PI * 6.0f); // Smooth tiny variation
+        hp.colorShade = 0.88f + 0.04f * sinf(t * PI * 4.0f);
         hp.bright = 0;
-        hp.thetaSweep = 0.0f; // Straight down, no side-sweep
-
-        // V-shape: center strands (t~0.5) are LONGEST, edges are shorter
-        float distFromCenter = fabsf(t - 0.5f) * 2.0f;
-        float bangLen = 0.45f - 0.15f * distFromCenter; // Center: 0.45, Edges: 0.30
+        
+        // M shape lengths and sweeps
+        float midDist = fabsf(t - 0.5f);
+        float bangLen;
+        if (midDist < 0.2f) {
+            // Inner M valley
+            bangLen = 0.30f + 0.6f * midDist; // 0.3 at middle, 0.42 at peak
+        } else {
+            // Outer M tapers off a bit then meets side hair
+            bangLen = 0.42f - 0.20f * (midDist - 0.2f); // smoothly shorter towards edges
+        }
+        
+        // Sweep sides outwards smoothly 
+        hp.thetaSweep = (t - 0.5f) * 1.5f;
 
         hp.numRings = 5;
         hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f };
         hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
-        hp.rings[2] = { 0.09f, -bangLen * 0.4f,  0.90f, 0.02f };
-        hp.rings[3] = { 0.07f, -bangLen * 0.75f,  0.55f, 0.01f };
+        hp.rings[2] = { 0.10f, -bangLen * 0.4f,  0.90f, 0.02f };
+        hp.rings[3] = { 0.08f, -bangLen * 0.8f,  0.60f, 0.01f };
         hp.rings[4] = { 0.03f, -bangLen,          0.15f, 0.00f }; 
-
-        drawPanel(hp);
-    }
-
-    // 2. Left Bangs (Sweeping Outwards)
-    const int numLeft = 4;
-    for (int i = 0; i < numLeft; ++i) {
-        float t = (float)i / (numLeft - 1);
-        float centerAngle = PI * 0.5f - PI * 0.08f - PI * 0.14f * t; 
-        float halfWidth = PI * 0.06f; 
-
-        HairPanel hp;
-        hp.thetaStart = centerAngle - halfWidth;
-        hp.thetaEnd = centerAngle + halfWidth;
-        hp.phiStart = PI * 0.02f + rr(i * 103, 0, 0.02f);
-        hp.phiConform = PI * 0.20f; 
-        hp.widthSegs = 4;
-        hp.lengthSegs = 10;
-        hp.colorTint = rr(i * 113, 0.1f, 0.6f);
-        hp.colorShade = 0.85f + rr(i * 127, 0, 0.10f);
-        hp.bright = 0;
-        
-        hp.thetaSweep = -0.45f - 0.25f * t; 
-
-        float bangLen = 0.15f + 0.10f * t; // Reduced length significantly        
-        hp.numRings = 5;
-        hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f };
-        hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
-        hp.rings[2] = { 0.10f, -bangLen * 0.4f,  0.90f, 0.02f };
-        hp.rings[3] = { 0.08f, -bangLen * 0.8f,  0.70f, 0.01f };
-        hp.rings[4] = { 0.04f, -bangLen,          0.20f, 0.00f };
-
-        drawPanel(hp);
-    }
-
-    // 3. Right Bangs (Sweeping Outwards)
-    const int numRight = 4;
-    for (int i = 0; i < numRight; ++i) {
-        float t = (float)i / (numRight - 1);
-        float centerAngle = PI * 0.5f + PI * 0.08f + PI * 0.14f * t; 
-        float halfWidth = PI * 0.06f; 
-
-        HairPanel hp;
-        hp.thetaStart = centerAngle - halfWidth;
-        hp.thetaEnd = centerAngle + halfWidth;
-        hp.phiStart = PI * 0.02f + rr(i * 131, 0, 0.02f);
-        hp.phiConform = PI * 0.20f; 
-        hp.widthSegs = 4;
-        hp.lengthSegs = 10;
-        hp.colorTint = rr(i * 139, 0.1f, 0.6f);
-        hp.colorShade = 0.85f + rr(i * 149, 0, 0.10f);
-        hp.bright = 0;
-        
-        hp.thetaSweep = 0.45f + 0.25f * t;
-
-        float bangLen = 0.15f + 0.10f * t; // Reduced length significantly
-        hp.numRings = 5;
-        hp.rings[0] = { 0.05f, 0.0f,   1.0f,  0.02f };
-        hp.rings[1] = { 0.07f, -0.04f,  1.0f,  0.03f };
-        hp.rings[2] = { 0.10f, -bangLen * 0.4f,  0.90f, 0.02f };
-        hp.rings[3] = { 0.08f, -bangLen * 0.8f,  0.70f, 0.01f };
-        hp.rings[4] = { 0.04f, -bangLen,          0.20f, 0.00f };
 
         drawPanel(hp);
     }
@@ -710,8 +662,9 @@ void drawInnerShell() {
             Vec3 p11 = v3add(skullPt(th1, phi1), v3scale(n11, shellOut));
             Vec3 p01 = v3add(skullPt(th1, phi0), v3scale(n01, shellOut));
 
+            float v = (float)i / stacks; // Map vertical to gradient v
             float shade = 0.75f + 0.12f * cosf(phi0 * 2);
-            setHairColor(shade, 0.3f + 0.2f * cosf(th0 * 2));
+            setHairColorGradient(shade, 0.3f + 0.2f * cosf(th0 * 2), v, 0);
             emitQ(p00, n00, p10, n10, p11, n11, p01, n01);
         }
     }
@@ -894,14 +847,248 @@ void drawRabbitEars() {
     glEnable(GL_TEXTURE_2D);
 }
 
+void drawEarrings() {
+    glDisable(GL_TEXTURE_2D);
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        // Move to ear lobe
+        glTranslatef(side * 0.37f, -0.02f, 0.15f);
+
+        int sides = 12;
+        float rTop = 0.015f, rBot = 0.035f;
+        float zTop = 0.0f, zBot = -0.10f;
+
+        // Golden bell
+        glColor3f(0.9f, 0.75f, 0.2f);
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= sides; i++) {
+            float th = (float)i / sides * TWO_PI;
+            float ct = cosf(th), st = sinf(th);
+            glNormal3f(ct, st, 0.2f);
+            glVertex3f(rBot * ct, rBot * st, zBot);
+            glVertex3f(rTop * ct, rTop * st, zTop);
+        }
+        glEnd();
+
+        // White Tassels
+        glColor3f(0.95f, 0.95f, 0.95f);
+        float tTop = zBot;
+        float tBot = -0.18f;
+        float rtTop = 0.025f, rtBot = 0.005f;
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= sides; i++) {
+            float th = (float)i / sides * TWO_PI;
+            float ct = cosf(th), st = sinf(th);
+            glNormal3f(ct, st, 0.1f);
+            glVertex3f(rtBot * ct, rtBot * st, tBot);
+            glVertex3f(rtTop * ct, rtTop * st, tTop);
+        }
+        glEnd();
+
+        glPopMatrix();
+    }
+}
+
+void drawHeadpiece() {
+    glDisable(GL_CULL_FACE); // ensure we can see the jewel backs if slightly tilted
+    glDisable(GL_TEXTURE_2D);
+
+    // Front center jewel setup (V-shape / bird mask design)
+    glPushMatrix();
+    glTranslatef(0.0f, 0.42f, 0.81f); // Balanced halfway (0.35 -> 0.42)
+    glRotatef(35.0f, 1.0f, 0.0f, 0.0f); // Tilt more to lie flat on the higher forehead curvature
+
+    auto drawGem = [](float scaleX, float scaleY, float r, float g, float b, bool pointDown=false) {
+        glColor3f(r, g, b);
+        glBegin(GL_TRIANGLE_FAN);
+        glNormal3f(0, 1, 0); // Front face normal
+        glVertex3f(0, 0.03f, 0); // Bevel center
+        int pts = 16;
+        for (int i = 0; i <= pts; i++) {
+            float th = (float)i / pts * TWO_PI;
+            float st = sinf(th), ct = cosf(th);
+            if (pointDown) {
+                if (st < 0) st *= 1.5f; // Pull down 
+            } else {
+                if (st > 0) st *= 1.5f; // Pull up
+            }
+            float nx = ct, ny = 0.5f, nz = st;
+            float len = sqrtf(nx*nx + ny*ny + nz*nz);
+            glNormal3f(nx/len, ny/len, nz/len);
+            glVertex3f(ct * scaleX, 0, st * scaleY);
+        }
+        glEnd();
+    };
+
+    // Center Piece (Triangle pointing down)
+    // Golden Base
+    drawGem(0.05f, 0.07f, 0.85f, 0.70f, 0.15f, true);
+    // Blue Gem
+    glTranslatef(0.0f, 0.005f, 0.0f);
+    drawGem(0.03f, 0.05f, 0.1f, 0.7f, 1.0f, true);
+
+    // Two massive "wing/ear" jewels spreading outwards (matching the reference pic)
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        glTranslatef(side * 0.08f, 0.0f, 0.04f); // Up and out
+        glRotatef(side * -45.0f, 0.0f, 0.0f, 1.0f); // Rotate outwards 45 deg
+        // Golden Base
+        drawGem(0.06f, 0.13f, 0.85f, 0.70f, 0.15f, false);
+        // Blue Gem
+        glTranslatef(0.0f, 0.005f, 0.0f);
+        drawGem(0.04f, 0.10f, 0.1f, 0.7f, 1.0f, false);
+        glPopMatrix();
+    }
+
+    // Small blue jewel accents on the far sides
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        glTranslatef(side * 0.18f, -0.015f, 0.02f); 
+        glRotatef(side * -20.0f, 0.0f, 0.0f, 1.0f); 
+        // Golden Base
+        drawGem(0.035f, 0.05f, 0.85f, 0.70f, 0.15f, false);
+        glTranslatef(0.0f, 0.005f, 0.0f);
+        // Blue dot/accent
+        drawGem(0.02f, 0.035f, 0.1f, 0.7f, 1.0f, false);
+        glPopMatrix();
+    }
+    glPopMatrix(); // End overall jewel setup
+
+    // Golden Base Band across forehead hugging the gems
+    glColor3f(0.85f, 0.70f, 0.15f);
+    glPushMatrix();
+    glTranslatef(0.0f, 0.45f, 0.76f); // Base of headpiece (0.38 -> 0.45)
+    glRotatef(25.0f, 1.0f, 0.0f, 0.0f);
+    glBegin(GL_QUAD_STRIP);
+    int bandSegs = 20;
+    for (int i = 0; i <= bandSegs; i++) {
+        float t = (float)i / bandSegs;
+        float a = t * PI; // Semi-circle
+        float x = -0.28f * cosf(a);
+        float y = -0.10f * sinf(a); // curves back slightly
+        float z = -0.08f * sinf(a); // dips down on sides
+        float thick = 0.025f * sinf(a); // thinner band
+        
+        // V-shape dip in the very center to hold the down-pointing jewel
+        float centerDist = fabsf(t - 0.5f);
+        if(centerDist < 0.10f) {
+            z -= 0.04f * (0.10f - centerDist) / 0.10f; 
+        }
+
+        glNormal3f(0, 1, 0.3f);
+        glVertex3f(x, y, z - 0.015f);
+        glVertex3f(x, y, z + thick + 0.015f);
+    }
+    glEnd();
+    glPopMatrix();
+
+    // Golden Curved Horns / Filigree (SHORTER, more intricate curls framing the face)
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        glTranslatef(side * 0.20f, 0.39f, 0.70f); // Horns (0.32 -> 0.39)
+        
+        int segments = 16;
+        for (int i = 0; i < segments; i++) {
+            float t1 = (float)i / segments;
+            float t2 = (float)(i+1) / segments;
+            
+            // Short, sharp curl UPWARDS hugging the wings
+            float h1X = (side * 1.0f) * (0.16f * t1 + 0.03f * t1 * t1); // Doesn't go out nearly as far
+            float h1Y = -0.05f * t1 - 0.1f * t1 * t1; 
+            float h1Z = 0.08f * t1 + 0.12f * t1 * t1; // Upward curl
+            float r1 = 0.02f * (1.1f - t1) * (1.0f - 0.2f*t1); // Slimmer
+            
+            float h2X = (side * 1.0f) * (0.16f * t2 + 0.03f * t2 * t2);
+            float h2Y = -0.05f * t2 - 0.1f * t2 * t2;
+            float h2Z = 0.08f * t2 + 0.12f * t2 * t2;
+            float r2 = 0.02f * (1.1f - t2) * (1.0f - 0.2f*t2);
+
+            glBegin(GL_QUAD_STRIP);
+            for (int k = 0; k <= 6; k++) { 
+                float a = (float)k / 6.0f * TWO_PI;
+                float ct = cosf(a), st = sinf(a);
+                glNormal3f(ct, 0.3f, st);
+                glVertex3f(h2X + ct * r2, h2Y, h2Z + st * r2);
+                glVertex3f(h1X + ct * r1, h1Y, h1Z + st * r1);
+            }
+            glEnd();
+        }
+
+        // Lower, tight backwards curl replacing the giant hooks
+        for (int i = 0; i < segments; i++) {
+            float t1 = (float)i / segments;
+            float t2 = (float)(i+1) / segments;
+            
+            float h1X = (side * 1.0f) * (0.12f * t1 + 0.05f * t1 * t1); 
+            float h1Y = -0.05f * t1;
+            float h1Z = -0.05f * t1 - 0.05f * t1 * t1; // Short shallow curl under
+            float r1 = 0.015f * (1.1f - t1);
+            
+            float h2X = (side * 1.0f) * (0.12f * t2 + 0.05f * t2 * t2);
+            float h2Y = -0.05f * t2;
+            float h2Z = -0.05f * t2 - 0.05f * t2 * t2;
+            float r2 = 0.015f * (1.1f - t2);
+
+            glBegin(GL_QUAD_STRIP);
+            for (int k = 0; k <= 6; k++) {
+                float a = (float)k / 6.0f * TWO_PI;
+                float ct = cosf(a), st = sinf(a);
+                glNormal3f(ct, 0.3f, st);
+                glVertex3f(h2X + ct * r2, h2Y, h2Z + st * r2);
+                glVertex3f(h1X + ct * r1, h1Y, h1Z + st * r1);
+            }
+            glEnd();
+        }
+        glPopMatrix();
+    }
+}
+
+void drawHairLoopsAsPanels() {
+    for (int side = 0; side < 2; ++side) { // 0: Right, 1: Left
+        float baseAngle = (side == 0) ? (PI * 0.15f) : (PI * 0.85f); 
+        
+        HairPanel hp;
+        hp.thetaStart = baseAngle - PI * 0.12f;
+        hp.thetaEnd = baseAngle + PI * 0.12f;
+        hp.phiStart = PI * 0.15f; 
+        hp.phiConform = PI * 0.25f; // Pops out more
+        hp.widthSegs = 6;
+        hp.lengthSegs = 18;
+        hp.colorTint = 0.5f;
+        hp.colorShade = 0.95f;
+        hp.bright = 1;
+        
+        // Massive sweep outwards then inwards
+        hp.thetaSweep = (side == 0) ? 0.8f : -0.8f;
+
+        // An exaggerated bulge creates the "loop" bundle effect
+        float totalDrop = 1.3f; // End near chin/neck
+        float outSpread = 0.45f; // Massive bulge curve
+        
+        hp.numRings = 7;
+        // { offsetOut, offsetZ, widthMul, bulge }
+        hp.rings[0] = { 0.06f, 0.0f,   1.0f,  outSpread * 0.1f };
+        hp.rings[1] = { 0.12f, -0.15f, 1.3f,  outSpread * 0.6f };
+        hp.rings[2] = { 0.10f, -0.35f, 1.4f,  outSpread * 1.0f }; // Maximum ballooning out
+        hp.rings[3] = { 0.07f, -0.60f, 1.2f,  outSpread * 0.7f };
+        hp.rings[4] = { 0.05f, -0.85f, 0.8f,  outSpread * 0.3f };
+        hp.rings[5] = { 0.03f, -1.05f, 0.5f,  outSpread * 0.1f };
+        hp.rings[6] = { 0.02f, -totalDrop, 0.2f, 0.0f };
+
+        drawPanel(hp);
+    }
+}
+
 void drawHairModel() {
     glDisable(GL_CULL_FACE);
     drawRabbitEars(); // Add the ears to the model
+    drawHeadpiece();
+    drawEarrings();
     drawTopHair();
     drawBackHair();
     drawSideHair();   // Dense bulk on the sides
+    // drawHairLoopsAsPanels(); // Exaggerated back bundles under headpiece
     drawLayerStrands();
-    // drawSideFringe(); 
     drawBangs();
     drawAccentStrands();
 }
