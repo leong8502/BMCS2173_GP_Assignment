@@ -479,9 +479,9 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
 
 	initOpenGL();
 	setupLighting();
-	textureMetalID = loadBMPTexture("metal.bmp");
-	textureWoodID = loadBMPTexture("wood.bmp");
-	textureChainID = loadBMPTexture("chain.bmp");
+	textureMetalID = loadBMPTexture("Textures/metal.bmp");
+	textureWoodID = loadBMPTexture("Textures/wood.bmp");
+	textureChainID = loadBMPTexture("Textures/chain.bmp");
 
 	ShowWindow(hWnd, nCmdShow);
 

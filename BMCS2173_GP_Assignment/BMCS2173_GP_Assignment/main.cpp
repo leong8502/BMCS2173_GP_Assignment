@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <vector>
 #include <string>
-#include <fstream>aw
+#include <fstream>
 #include <sstream>
 
 using std::max;
@@ -92,7 +92,16 @@ float charX = 0.0f;
 float charZ = 0.0f;
 float charRotation = 0.0f;
 float walkPhase = 0.0f;
+float walkWeight = 0.0f; // Smooth transition for walk animation
 float walkArmSwing = 0.0f;
+
+// New joint angles for smoother walking
+float leftKneeAngle = 0.0f;
+float rightKneeAngle = 0.0f;
+float leftElbowAngle = 0.0f;
+float rightElbowAngle = 0.0f;
+float walkBobY = 0.0f;   // Vertical bobbing
+float walkWristRoll = 0.0f; // Side-to-side wrist tilt
 bool keys[256];
 
 bool weapon1_status = false; // Meteor Hammer equipped
@@ -135,6 +144,33 @@ float lightZ = -30.0f;
 // Spotlight parameters
 float spotAngleX = 0.0f;
 float spotAngleY = 0.0f;
+
+// UI and Visibility variables
+const int SIDEBAR_WIDTH = 240;
+const int COLLAPSED_WIDTH = 30;
+bool showHead = true;
+bool showBody = true;
+bool showArms = true;
+bool showLegs = true;
+bool showBackground = true;
+bool uiSidebarOpen = true;
+
+int windowWidth = 800;
+int windowHeight = 600;
+int uiMouseX = 0;
+int uiMouseY = 0;
+bool uiLeftDown = false;
+GLuint fontBase = 0;
+
+// Separate Control Window Variables
+HWND hControlWnd = NULL;
+HDC hControlDC = NULL;
+HGLRC hControlRC = NULL;
+int controlWidth = 260;
+int controlHeight = 600;
+int uiControlMouseX = 0;
+int uiControlMouseY = 0;
+bool uiControlLeftDown = false;
 
 DWORD lastTime = 0;
 
@@ -188,6 +224,189 @@ Vec3 v3norm(Vec3 v) {
     return v3(v.x / l, v.y / l, v.z / l);
 }
 Vec3 v3lerp(Vec3 a, Vec3 b, float t) { return v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t); }
+
+// UI Utilities
+void initFont(HDC hdc) {
+    fontBase = glGenLists(96);
+    HFONT font = CreateFont(-16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, "Segoe UI");
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+    wglUseFontBitmaps(hdc, 32, 96, fontBase);
+    SelectObject(hdc, oldFont);
+    DeleteObject(font);
+}
+
+void drawText(int x, int y, const char* str) {
+    glRasterPos2i(x, y);
+    glPushAttrib(GL_LIST_BIT);
+    glListBase(fontBase - 32);
+    glCallLists((GLsizei)strlen(str), GL_UNSIGNED_BYTE, (GLubyte*)str);
+    glPopAttrib();
+}
+
+void drawRect(int x, int y, int w, int h, float r, float g, float b, float a) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(r, g, b, a);
+    glBegin(GL_QUADS);
+    glVertex2i(x, y);
+    glVertex2i(x + w, y);
+    glVertex2i(x + w, y + h);
+    glVertex2i(x, y + h);
+    glEnd();
+    glDisable(GL_BLEND);
+}
+
+bool isMouseIn(int x, int y, int w, int h) {
+    return (uiControlMouseX >= x && uiControlMouseX <= x + w && uiControlMouseY >= y && uiControlMouseY <= y + h);
+}
+
+bool drawButton(int x, int y, int w, int h, const char* label, bool active) {
+    bool hovered = isMouseIn(x, y, w, h);
+    if (active) drawRect(x, y, w, h, 0.2f, 0.5f, 1.0f, 0.8f); // Active: Blue
+    else if (hovered) drawRect(x, y, w, h, 0.3f, 0.3f, 0.4f, 0.6f); // Hover: Darker
+    else drawRect(x, y, w, h, 0.15f, 0.15f, 0.25f, 0.4f); // Idle: Dark
+
+    // Border
+    glLineWidth(1.0f);
+    if (hovered) glColor4f(1, 1, 1, 0.8f);
+    else glColor4f(1, 1, 1, 0.2f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2i(x,y);     glVertex2i(x+w,y);
+    glVertex2i(x+w,y+h); glVertex2i(x,y+h);
+    glEnd();
+
+    glColor3f(1, 1, 1);
+    drawText(x + 10, y + 20, label);
+    
+    return (hovered && uiControlLeftDown);
+}
+
+void drawOverlayUI() {
+    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_TRANSFORM_BIT | GL_LIGHTING_BIT);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, controlWidth, controlHeight, 0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    // Background (Glassmorphism)
+    drawRect(0, 0, controlWidth, controlHeight, 0.05f, 0.05f, 0.1f, 0.85f);
+    
+    int yOffset = 30;
+    glColor3f(0.6f, 0.7f, 1.0f);
+    drawText(20, yOffset, "PART FILTERING");
+    yOffset += 30;
+
+    static bool toggleDebounce = false;
+    auto toggle = [&](bool& var, int x, int y, int w, int h, const char* name) {
+        if (drawButton(x, y, w, h, name, var)) {
+            if (!toggleDebounce) { 
+                var = !var; 
+                toggleDebounce = true; 
+                // Invalidate body cache if body visibility changes
+                if (&var == &showBody && cachedBodyList != 0) {
+                    glDeleteLists(cachedBodyList, 1);
+                    cachedBodyList = 0;
+                }
+            }
+        }
+    };
+
+    toggle(showBackground, 20, yOffset, 220, 30, "Show Background"); yOffset += 45;
+
+    glColor3f(0.6f, 0.7f, 1.0f);
+    drawText(20, yOffset, "ISOLATE COMPONENT");
+    yOffset += 30;
+
+    auto isolate = [&](const char* label, bool& targetVar, float h, float d) {
+        if (drawButton(20, yOffset, 220, 30, label, targetVar)) {
+            if (!toggleDebounce) {
+                showHead = showBody = showArms = showLegs = false;
+                targetVar = true;
+                cameraHeight = h;
+                cameraDistance = d;
+                toggleDebounce = true;
+                if (cachedBodyList != 0) { glDeleteLists(cachedBodyList, 1); cachedBodyList = 0; }
+            }
+        }
+        yOffset += 35;
+    };
+
+    if (drawButton(20, yOffset, 220, 30, "Full View (All)", (showHead && showBody && showArms && showLegs))) {
+        if (!toggleDebounce) {
+            showHead = showBody = showArms = showLegs = true;
+            cameraHeight = 3.5f;
+            cameraDistance = 8.0f;
+            toggleDebounce = true;
+            if (cachedBodyList != 0) { glDeleteLists(cachedBodyList, 1); cachedBodyList = 0; }
+        }
+    }
+    yOffset += 35;
+
+    isolate("Head (head8.cpp)",  showHead, 2.0f, 2.5f);
+    isolate("Body (body.cpp)",   showBody, 1.6f, 4.5f);
+    isolate("Arms (arms.cpp)",   showArms, 1.6f, 4.5f);
+    isolate("Legs (legs.cpp)",   showLegs, 0.8f, 3.5f);
+
+    yOffset += 20;
+    glColor3f(0.6f, 0.7f, 1.0f);
+    drawText(20, yOffset, "WEAPONS");
+    yOffset += 30;
+
+    if (drawButton(20, yOffset, 220, 30, "Meteor Hammer", weapon1_status)) {
+        if (!toggleDebounce) {
+            weapon1_status = !weapon1_status;
+            if (weapon1_status) weapon2_status = false;
+            for(int i=0; i<5; i++) leftFingerActive[i] = (weapon1_status || weapon2_status);
+            toggleDebounce = true;
+        }
+    }
+    yOffset += 35;
+
+    if (drawButton(20, yOffset, 220, 30, "Imperial Fan", weapon2_status)) {
+        if (!toggleDebounce) {
+            weapon2_status = !weapon2_status;
+            if (weapon2_status) weapon1_status = false;
+            for(int i=0; i<5; i++) leftFingerActive[i] = (weapon1_status || weapon2_status);
+            if (weapon2_status) fanTargetAngle = 0.0f;
+            toggleDebounce = true;
+        }
+    }
+    yOffset += 35;
+
+    yOffset += 20;
+    glColor3f(0.6f, 0.7f, 1.0f);
+    drawText(20, yOffset, "MODES");
+    yOffset += 30;
+
+    toggle(isWireframe, 20, yOffset, 220, 30, "Polygon View"); yOffset += 35;
+    
+    if (drawButton(20, yOffset, 220, 30, lightingMode == 1 ? "Mode: Ambient" : "Mode: Diffuse", true)) {
+        if (!toggleDebounce) {
+            lightingMode = (lightingMode == 1) ? 2 : 1;
+            toggleDebounce = true;
+        }
+    }
+    yOffset += 35;
+
+    if (!uiControlLeftDown) {
+        toggleDebounce = false;
+    }
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+    glPopAttrib();
+}
 
 float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 float smoothstep(float t) { t = clampf(t, 0, 1); return t * t * (3 - 2 * t); }
@@ -379,11 +598,20 @@ void emitQ(Vec3 p0, Vec3 n0, Vec3 p1, Vec3 n1, Vec3 p2, Vec3 n2, Vec3 p3, Vec3 n
 }
 
 void setHairColorGradient(float shade, float tint, float v, int bright) {
-    float rTop = 0.05f, gTop = 0.12f, bTop = 0.55f;
-    float rBot = 0.35f, gBot = 0.08f, bBot = 0.50f;
+    float rTop, gTop, bTop, rBot, gBot, bBot;
+    if (isWarmClothing) {
+        // Vibrant Red to Deep Maroon gradient
+        rTop = 0.90f; gTop = 0.10f; bTop = 0.05f;
+        rBot = 0.35f; gBot = 0.02f; bBot = 0.02f;
+    } else {
+        // Original Blue to Purple gradient
+        rTop = 0.05f; gTop = 0.12f; bTop = 0.55f;
+        rBot = 0.35f; gBot = 0.08f; bBot = 0.50f;
+    }
+
     if (bright) {
-        rTop *= 1.30f; gTop *= 1.30f; bTop *= 1.30f;
-        rBot *= 1.30f; gBot *= 1.30f; bBot *= 1.30f;
+        rTop = min(1.0f, rTop * 1.30f); gTop = min(1.0f, gTop * 1.30f); bTop = min(1.0f, bTop * 1.30f);
+        rBot = min(1.0f, rBot * 1.30f); gBot = min(1.0f, gBot * 1.30f); bBot = min(1.0f, bBot * 1.30f);
     }
     float r = rTop + (rBot - rTop) * v;
     float g = gTop + (gBot - gTop) * v;
@@ -657,7 +885,8 @@ void drawEarrings() {
         glPushMatrix();
         glTranslatef(side * 0.37f, -0.02f, 0.15f);
         int slides = 12; float rTop = 0.015f, rBot = 0.035f; float zTop = 0.0f, zBot = -0.10f;
-        glColor3f(0.9f, 0.75f, 0.2f);
+        if (isWarmClothing) glColor3f(0.95f, 0.95f, 0.98f);
+        else                glColor3f(0.9f, 0.75f, 0.2f);
         glBegin(GL_QUAD_STRIP);
         for (int i = 0; i <= slides; i++) {
             float th = (float)i / slides * TWO_PI; float ct = cosf(th), st = sinf(th);
@@ -680,8 +909,10 @@ void drawHeadpiece() {
     glDisable(GL_CULL_FACE); glDisable(GL_TEXTURE_2D);
     glPushMatrix();
     glTranslatef(0.0f, 0.42f, 0.81f); glRotatef(35.0f, 1.0f, 0.0f, 0.0f);
-    auto drawGem = [](float scaleX, float scaleY, float r, float g, float b, bool pointDown=false) {
-        glColor3f(r, g, b); glBegin(GL_TRIANGLE_FAN); glNormal3f(0, 1, 0); glVertex3f(0, 0.03f, 0);
+    auto drawGem = [](bool isWarm, float scaleX, float scaleY, float r, float g, float b, bool pointDown=false) {
+        if (isWarm) glColor3f(0.95f, 0.95f, 0.98f);
+        else        glColor3f(r, g, b);
+        glBegin(GL_TRIANGLE_FAN); glNormal3f(0, 1, 0); glVertex3f(0, 0.03f, 0);
         int pts = 16;
         for (int i = 0; i <= pts; i++) {
             float th = (float)i / pts * TWO_PI; float st = sinf(th), ct = cosf(th);
@@ -691,22 +922,24 @@ void drawHeadpiece() {
         }
         glEnd();
     };
-    drawGem(0.05f, 0.07f, 0.85f, 0.70f, 0.15f, true);
-    glTranslatef(0.0f, 0.005f, 0.0f); drawGem(0.03f, 0.05f, 0.1f, 0.7f, 1.0f, true);
+    drawGem(isWarmClothing, 0.05f, 0.07f, 0.85f, 0.70f, 0.15f, true);
+    glTranslatef(0.0f, 0.005f, 0.0f); drawGem(false, 0.03f, 0.05f, 0.1f, 0.7f, 1.0f, true); // Keep the blue jewel center or make it red? I'll keep it blue/cyan unless asked
     for (int side = -1; side <= 1; side += 2) {
         glPushMatrix(); glTranslatef(side * 0.08f, 0.0f, 0.04f); glRotatef(side * -45.0f, 0.0f, 0.0f, 1.0f);
-        drawGem(0.06f, 0.13f, 0.85f, 0.70f, 0.15f, false);
-        glTranslatef(0.0f, 0.005f, 0.0f); drawGem(0.04f, 0.10f, 0.1f, 0.7f, 1.0f, false);
+        drawGem(isWarmClothing, 0.06f, 0.13f, 0.85f, 0.70f, 0.15f, false);
+        glTranslatef(0.0f, 0.005f, 0.0f); drawGem(false, 0.04f, 0.10f, 0.1f, 0.7f, 1.0f, false);
         glPopMatrix();
     }
     for (int side = -1; side <= 1; side += 2) {
         glPushMatrix(); glTranslatef(side * 0.18f, -0.015f, 0.02f); glRotatef(side * -20.0f, 0.0f, 0.0f, 1.0f); 
-        drawGem(0.035f, 0.05f, 0.85f, 0.70f, 0.15f, false);
-        glTranslatef(0.0f, 0.005f, 0.0f); drawGem(0.02f, 0.035f, 0.1f, 0.7f, 1.0f, false);
+        drawGem(isWarmClothing, 0.035f, 0.05f, 0.85f, 0.70f, 0.15f, false);
+        glTranslatef(0.0f, 0.005f, 0.0f); drawGem(false, 0.02f, 0.035f, 0.1f, 0.7f, 1.0f, false);
         glPopMatrix();
     }
     glPopMatrix();
-    glColor3f(0.85f, 0.70f, 0.15f); glPushMatrix(); glTranslatef(0.0f, 0.45f, 0.76f); glRotatef(25.0f, 1.0f, 0.0f, 0.0f);
+    if (isWarmClothing) glColor3f(0.95f, 0.95f, 0.98f);
+    else                glColor3f(0.85f, 0.70f, 0.15f);
+    glPushMatrix(); glTranslatef(0.0f, 0.45f, 0.76f); glRotatef(25.0f, 1.0f, 0.0f, 0.0f);
     glBegin(GL_QUAD_STRIP); int bandSegs = 20;
     for (int i = 0; i <= bandSegs; i++) {
         float t = (float)i / bandSegs; float a = t * PI;
@@ -832,7 +1065,10 @@ void resetAll()
     leftHandRotAngle = 0.0f; rightHandRotAngle = 0.0f;
 
     charX = 0.0f; charZ = 0.0f; charRotation = 0.0f;
-    walkPhase = 0.0f; walkArmSwing = 0.0f;
+    walkPhase = 0.0f; walkWeight = 0.0f; walkArmSwing = 0.0f;
+    leftKneeAngle = 0.0f; rightKneeAngle = 0.0f;
+    leftElbowAngle = 0.0f; rightElbowAngle = 0.0f;
+    walkBobY = 0.0f; walkWristRoll = 0.0f;
     for (int i = 0; i < 256; i++) keys[i] = false;
 
     weapon1_status = false;
@@ -1240,20 +1476,45 @@ void updateAnimation()
     if (keys['S']) { charX -= dx; charZ -= dz; moving = true; }
 
     if (moving) {
-        walkPhase += dt * 12.0f; // speed of leg oscillation
-        leftLegAngle  = sin(walkPhase) * 35.0f;
-        rightLegAngle = -sin(walkPhase) * 35.0f;
-        walkArmSwing  = sin(walkPhase) * 10.0f; // subtle arm swing
+        walkWeight += 3.0f * dt; // Fade in walking animation
+        if (walkWeight > 1.0f) walkWeight = 1.0f;
     } else {
-        // Smoothly reset legs and arm swing to neutral
-        float resetSpeed = 8.0f;
-        leftLegAngle  -= leftLegAngle * resetSpeed * dt;
-        rightLegAngle -= rightLegAngle * resetSpeed * dt;
-        walkArmSwing  -= walkArmSwing * resetSpeed * dt;
+        walkWeight -= 3.0f * dt; // Fade out walking animation
+        if (walkWeight < 0.0f) walkWeight = 0.0f;
+    }
 
-        if (fabs(leftLegAngle) < 0.1f)  leftLegAngle = 0;
-        if (fabs(rightLegAngle) < 0.1f) rightLegAngle = 0;
-        if (fabs(walkArmSwing) < 0.1f)  walkArmSwing = 0;
+    if (walkWeight > 0.0f) {
+        walkPhase += dt * 10.0f; // Adjusted walking speed
+        
+        // Hip/Leg swing (30-40 degrees)
+        leftLegAngle  = sin(walkPhase) * 35.0f * walkWeight;
+        rightLegAngle = -sin(walkPhase) * 35.0f * walkWeight;
+        
+        // Arm swing (diagonal sync: left arm opposite of left leg)
+        // Magnitude increased slightly for better visibility
+        walkArmSwing = sin(walkPhase) * 15.0f * walkWeight; 
+
+        // Knee bending logic: Bends backward during the "swing" phase (when leg is moving forward)
+        // Knee bending peaks shortly after the hip reaches maximum backward extension
+        leftKneeAngle  = (leftLegAngle < 0) ? -leftLegAngle * 1.1f : 0.0f;
+        rightKneeAngle = (rightLegAngle < 0) ? -rightLegAngle * 1.1f : 0.0f;
+        
+        // Elbow bending: Bends more during the forward swing
+        leftElbowAngle  = 15.0f + sin(walkPhase + 1.5f) * 15.0f * walkWeight;
+        rightElbowAngle = 15.0f + sin(walkPhase - 1.5f) * 15.0f * walkWeight;
+
+        // Vertical "bobing" effect: character rises slightly twice per cycle (when legs cross)
+        walkBobY = fabs(sin(walkPhase)) * 0.08f * walkWeight;
+
+        // Subtle side-to-side wrist roll
+        walkWristRoll = sin(walkPhase) * 5.0f * walkWeight;
+    } else {
+        // Smoothly reset all to 0
+        leftLegAngle = 0; rightLegAngle = 0;
+        leftKneeAngle = 0; rightKneeAngle = 0;
+        leftElbowAngle = 0; rightElbowAngle = 0;
+        walkArmSwing = 0; walkPhase = 0;
+        walkBobY = 0; walkWristRoll = 0;
     }
 
     // Fan spread animation
@@ -1364,11 +1625,60 @@ void updateAnimation()
 // Window procedure
 //================================
 
+LRESULT WINAPI ControlWindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_SIZE:
+        controlWidth = LOWORD(lParam);
+        controlHeight = HIWORD(lParam);
+        break;
+
+    case WM_MOUSEMOVE:
+        uiControlMouseX = LOWORD(lParam);
+        uiControlMouseY = HIWORD(lParam);
+        break;
+
+    case WM_LBUTTONDOWN:
+        uiControlLeftDown = true;
+        break;
+
+    case WM_LBUTTONUP:
+        uiControlLeftDown = false;
+        break;
+
+    case WM_CLOSE:
+        ShowWindow(hWnd, SW_HIDE); // Hide instead of closing
+        return 0;
+    }
+    return DefWindowProc(hWnd, msg, wParam, lParam);
+}
+
 LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
     {
+    case WM_SIZE:
+        windowWidth = LOWORD(lParam);
+        windowHeight = HIWORD(lParam);
+        glViewport(0, 0, windowWidth, windowHeight);
+        break;
+
+    case WM_MOUSEMOVE:
+        uiMouseX = LOWORD(lParam);
+        uiMouseY = HIWORD(lParam);
+        break;
+
+    case WM_LBUTTONDOWN:
+        uiLeftDown = true;
+        break;
+
+    case WM_LBUTTONUP:
+        uiLeftDown = false;
+        break;
+
     case WM_DESTROY:
+        if (fontBase) glDeleteLists(fontBase, 96);
         PostQuitMessage(0);
         break;
 
@@ -1550,7 +1860,7 @@ bool initPixelFormat(HDC hdc)
 {
     PIXELFORMATDESCRIPTOR pfd;
     ZeroMemory(&pfd, sizeof(PIXELFORMATDESCRIPTOR));
-    pfd.cAlphaBits  = 8; pfd.cColorBits = 32; pfd.cDepthBits = 24; pfd.cStencilBits = 0;
+    pfd.cAlphaBits  = 8; pfd.cColorBits = 32; pfd.cDepthBits = 24; pfd.cStencilBits = 8;
     pfd.dwFlags     = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
     pfd.iLayerType  = PFD_MAIN_PLANE;
     pfd.iPixelType  = PFD_TYPE_RGBA;
@@ -2132,7 +2442,7 @@ void drawCuteRabbit()
     glScalef(0.06f, 0.04f, 0.04f);
     gluSphere(q, 0.5f, 16, 16);
     glPopMatrix();
-
+ 
     // 7. Arms (Small white capsules)
     glColor3f(0.95f, 0.95f, 0.98f);
     for (int i = -1; i <= 1; i += 2) {
@@ -2290,6 +2600,10 @@ void drawBackground()
 //  LEGS  (from legs.cpp)
 //================================================================
 
+//================================================================
+//  LEGS  (from legs.cpp)
+//================================================================
+
 void drawProceduralLegPart(float length, float topRx, float topRy,
                             float bottomRx, float bottomRy,
                             int slices, int stacks,
@@ -2377,7 +2691,7 @@ void drawRoundTrim(float r)
     glEnd();
 }
 
-void drawLegBase(bool isLeft)
+void drawLegBase(bool isLeft, float kneeAng = 0.0f)
 {
     GLUquadric* quad = gluNewQuadric();
     gluQuadricNormals(quad, GLU_SMOOTH);
@@ -2389,46 +2703,77 @@ void drawLegBase(bool isLeft)
     if (!isLeft) {
         // Right leg logic
         if (!isShadowPass) {
+            glEnable(GL_TEXTURE_2D);
             glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
         }
         drawProceduralLegPart(0.75f, 0.19f,0.20f, 0.12f,0.12f, 60,40, 0.015f,0.5f);
         glTranslatef(0,0,0.75f);
+        glRotatef(kneeAng, 1, 0, 0); // Apply knee bending
         gluSphere(quad, 0.095f, 40,40);
         drawProceduralLegPart(0.12f, 0.12f,0.12f, 0.13f,0.13f, 60,20, 0.005f,0.5f);
         glTranslatef(0,0,0.12f);
         if (!isShadowPass) {
-            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+            if (isWarmClothing) {
+                glDisable(GL_TEXTURE_2D);
+                glColor3f(0.95f, 0.95f, 0.98f); // White/Silver
+            } else {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, texGold);
+                glColor3f(1,1,1);
+            }
         }
         drawProceduralLegPart(0.06f, 0.14f,0.14f, 0.13f,0.13f, 60,20, 0.0f,0.5f);
         drawRoundTrim(0.14f);
         glTranslatef(0,0,0.06f);
         if (!isShadowPass) {
-            glBindTexture(GL_TEXTURE_2D, texFabric);
-            if (isWarmClothing) glColor3f(1.0f, 0.3f, 0.2f);
-            else                glColor3f(1,1,1);
+            if (isWarmClothing) {
+                glDisable(GL_TEXTURE_2D);
+                glColor3f(1.0f, 0.62f, 0.22f); // Light Orange Sock
+            } else {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, texFabric);
+                glColor3f(1,1,1);
+            }
         }
+        float sr=1.0f, sg=1.0f, sb=1.0f;
+        if (isWarmClothing) { sr=1.0f; sg=0.62f; sb=0.22f; }
+        // drawProceduralLegPart doesn't support RGB yet, but it doesn't overwrite color either!
         drawProceduralLegPart(0.65f, 0.12f,0.12f, 0.07f,0.07f, 60,50, 0.015f,0.2f);
         glTranslatef(0,0,0.65f);
     } else {
         // Left leg: high sock (mid thigh)
         if (!isShadowPass) {
+            glEnable(GL_TEXTURE_2D);
             glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texSkin);
         }
         drawProceduralLegPart(0.45f, 0.19f,0.20f, 0.15f,0.15f, 60,40, 0.012f,0.5f);
         glTranslatef(0,0,0.45f);
         if (!isShadowPass) {
-            glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+            if (isWarmClothing) {
+                glDisable(GL_TEXTURE_2D);
+                glColor3f(0.95f, 0.95f, 0.98f); // White/Silver
+            } else {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, texGold);
+                glColor3f(1,1,1);
+            }
         }
         drawProceduralLegPart(0.06f, 0.16f,0.16f, 0.14f,0.14f, 60,20, 0.0f,0.5f);
         drawRoundTrim(0.16f);
         glTranslatef(0,0,0.06f);
         if (!isShadowPass) {
-            glBindTexture(GL_TEXTURE_2D, texFabric);
-            if (isWarmClothing) glColor3f(1.0f, 0.3f, 0.2f); // Red sock
-            else                glColor3f(1,1,1);
+            if (isWarmClothing) {
+                glDisable(GL_TEXTURE_2D);
+                glColor3f(1.0f, 0.62f, 0.22f); // Light Orange Sock
+            } else {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, texFabric);
+                glColor3f(1,1,1);
+            }
         }
         drawProceduralLegPart(0.24f, 0.14f,0.14f, 0.12f,0.12f, 60,30, 0.012f,0.5f);
         glTranslatef(0,0,0.24f);
+        glRotatef(kneeAng, 1, 0, 0); // Apply knee bending
         gluSphere(quad, 0.095f, 40,40);
         drawProceduralLegPart(0.12f, 0.12f,0.12f, 0.13f,0.13f, 60,20, 0.005f,0.5f);
         glTranslatef(0,0,0.12f);
@@ -2452,13 +2797,28 @@ void drawLegBase(bool isLeft)
     glPushMatrix();
     glTranslatef(0,0,-0.08f);
     drawProceduralLegPart(0.10f, 0.11f,0.11f, 0.085f,0.085f, 60,20, 0.0f,0.5f);
-    glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.95f, 0.95f, 0.98f); // White/Silver
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texGold);
+        glColor3f(1,1,1);
+    }
     gluCylinder(quad, 0.12f, 0.12f, 0.02f, 60,20);
     glTranslatef(0,0,0.02f);
     gluCylinder(quad, 0.12f, 0.09f, 0.05f, 60,20);
     glPopMatrix();
 
-    // Gold balls (both sides)
+    // Gold/White balls (both sides)
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.95f, 0.95f, 0.98f); // White/Silver
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texGold);
+        glColor3f(1,1,1);
+    }
     glPushMatrix(); glTranslatef( 0.095f,0,0.04f); gluSphere(quad,0.045f,40,40); glPopMatrix();
     glPushMatrix(); glTranslatef(-0.095f,0,0.04f); gluSphere(quad,0.045f,40,40); glPopMatrix();
 
@@ -2490,7 +2850,14 @@ void drawLegBase(bool isLeft)
     glPopMatrix();
 
     // Heel (Positioned at back curve, lengthened to prevent burial)
-    glColor3f(1,1,1); glBindTexture(GL_TEXTURE_2D, texGold);
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.95f, 0.95f, 0.98f); // White/Silver
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texGold);
+        glColor3f(1,1,1);
+    }
     glPushMatrix();
     // Move slightly back (-Y) and set starting depth
     glTranslatef(0, -0.025f, 0.02f); 
@@ -2508,7 +2875,7 @@ void drawLeftLeg()
     glPushMatrix();
     glTranslatef(-0.16f, 1.53f, 0.0f);
     glRotatef(leftLegAngle, 1, 0, 0);
-    drawLegBase(true);
+    drawLegBase(true, leftKneeAngle);
     glPopMatrix();
 }
 
@@ -2517,7 +2884,7 @@ void drawRightLeg()
     glPushMatrix();
     glTranslatef(0.16f, 1.53f, 0.0f);
     glRotatef(rightLegAngle, 1, 0, 0);
-    drawLegBase(false);
+    drawLegBase(false, rightKneeAngle);
     glPopMatrix();
 }
 
@@ -2529,7 +2896,8 @@ void drawProceduralArmPart(float length,
     float topRx, float topRy, float bottomRx, float bottomRy,
     int slices, int stacks, float bulgeFactor, float bulgePos,
     float sweepStart = 0.0f, float sweepEnd = 2.0f*3.14159265f,
-    float pleatDepth = 0.0f, int pleatCount = 0)
+    float pleatDepth = 0.0f, int pleatCount = 0,
+    float r = 1.0f, float g = 1.0f, float b = 1.0f)
 {
     if (isShadowPass) {
         slices = (slices > 10) ? 10 : slices;
@@ -2580,7 +2948,7 @@ void drawProceduralArmPart(float length,
             float l2=sqrt(nx2*nx2+ny2*ny2+nz2*nz2);
             if(l2>0){nx2/=l2;ny2/=l2;nz2/=l2;}
 
-            glColor3f(shade,shade,shade);
+            if (!isShadowPass) glColor3f(r*shade, g*shade, b*shade);
             if (!isShadowPass) {
                 glNormal3f(nx2,ny2,nz2); glTexCoord2f(u,t2);
             }
@@ -2595,7 +2963,7 @@ void drawProceduralArmPart(float length,
     }
 }
 
-void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
+void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part, float elbowAng = 0.0f)
 {
     GLUquadric* quad = gluNewQuadric();
     gluQuadricTexture(quad, GL_TRUE);
@@ -2647,12 +3015,27 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     glDisable(GL_TEXTURE_2D);
 
     if (!isShadowPass && !isWireframe) {
-        glBindTexture(GL_TEXTURE_2D, texFabric);
-        glEnable(GL_TEXTURE_2D);
-        glColor3f(1,1,1);
+        if (isWarmClothing) {
+            glDisable(GL_TEXTURE_2D);
+            glColor3f(0.85f, 0.1f, 0.05f); // Red Upper Sleeve
+        } else {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, texFabric);
+            glColor3f(1,1,1);
+        }
     }
     glPushMatrix();
-    drawProceduralArmPart(0.53f,0.13f,0.13f,0.10f,0.10f,40,20,0.015f,0.5f);
+    float ar=1.0f, ag=1.0f, ab=1.0f;
+    if (isWarmClothing) { 
+        glDisable(GL_TEXTURE_2D); 
+        ar=0.85f; ag=0.10f; ab=0.05f; 
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texFabric);
+        ar=1.0f; ag=1.0f; ab=1.0f;
+    }
+    drawProceduralArmPart(0.53f,0.13f,0.13f,0.10f,0.10f,40,20,0.015f,0.5f, 0.0f, 2.0f*3.14159f, 0.0f, 0, ar, ag, ab);
+    if (!isShadowPass && !isWireframe) glEnable(GL_TEXTURE_2D); // Restore for subsequent parts
     glPopMatrix();
 
     // 2. Pauldron
@@ -2683,14 +3066,22 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     glEnd();
     glPopMatrix();
 
-    // 3. Two Gold bicep bands
-    glBindTexture(GL_TEXTURE_2D, texGold); glColor3f(1,1,1);
+    // 3. Two Gold/White bicep bands
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.95f, 0.95f, 0.98f); // White/Silver
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texGold);
+        glColor3f(1,1,1);
+    }
     for(int i=0; i<2; i++) {
         glPushMatrix();
         glTranslatef(0, 0, 0.08f + i*0.06f);
         gluCylinder(quad, 0.136f, 0.136f, 0.035f, 30, 1);
         glPopMatrix();
     }
+    glEnable(GL_TEXTURE_2D);
 
     // 4. White flared sleeve
     glPushMatrix();
@@ -2739,29 +3130,62 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
     glColor3f(1,1,1);
 
     // Upper arm skin
+    if (!isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texSkin);
+        glColor3f(1, 1, 1);
+    }
     drawProceduralArmPart(0.53f,0.125f,0.125f,0.095f,0.095f,40,40,0.015f,0.5f);
 
     // Elbow joint
     glTranslatef(0,0,0.53f);
-    glBindTexture(GL_TEXTURE_2D, texFabric); glColor3f(1,1,1);
-    gluSphere(quad,0.11f,40,40);
+    glRotatef(elbowAng, 1, 0, 0); // Apply elbow bending
+    float er=1.0f, eg=1.0f, eb=1.0f;
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        er=0.85f; eg=0.1f; eb=0.05f; // Red
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texFabric);
+        er=1.0f; eg=1.0f; eb=1.0f;
+    }
+    gluSphere(quad,0.11f,40,40); // Note: gluSphere doesn't accept colors, we rely on glColor set before
+    glColor3f(er, eg, eb);
+    if (!isShadowPass) glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texSkin);
 
     // Forearm
     glRotatef(-5,1,0,0);
     float wristRx= 0.065f, wristRy= 0.045f;
+    if (!isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texSkin);
+        glColor3f(1.0f, 1.0f, 1.0f);
+    }
     drawProceduralArmPart(0.53f,0.10f,0.10f,wristRx,wristRy,40,40,0.015f,0.3f);
 
     // Forearm sleeve
-    glBindTexture(GL_TEXTURE_2D, texFabric); 
-    if (isWarmClothing) glColor3f(1.0f, 0.3f, 0.2f); // Tinted red
-    else                glColor3f(1,1,1);
-    drawProceduralArmPart(0.53f,0.105f,0.105f,wristRx+0.003f,wristRy+0.003f,40,20,0.015f,0.3f);
+    float fr=1.0f, fg=1.0f, fb=1.0f;
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        fr=0.85f; fg=0.1f; fb=0.05f; // Red
+    } else {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texFabric);
+        fr=1.0f; fg=1.0f; fb=1.0f;
+    }
+    drawProceduralArmPart(0.53f,0.105f,0.105f,wristRx+0.003f,wristRy+0.003f,40,20,0.015f,0.3f, 0.0f, 2.0f*3.14159f, 0.0f, 0, fr, fg, fb);
 
-    // Gold wrist rings
+    // Gold/Red wrist rings
     glPushMatrix();
     glTranslatef(0,0,0.46f);
-    glBindTexture(GL_TEXTURE_2D, texGold); glColor3f(1,1,1);
+    if (isWarmClothing) {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.9f, 0.1f, 0.05f); // Red
+    } else {
+        glBindTexture(GL_TEXTURE_2D, texGold);
+        glColor3f(1,1,1);
+    }
     GLUquadric* qR=gluNewQuadric(); gluQuadricTexture(qR,GL_TRUE);
     for(int r=0;r<3;r++){
         glPushMatrix(); glTranslatef(0,0,r*0.015f);
@@ -2784,15 +3208,20 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
 
     // Toggleable Hand/Palm rotation (60 degree twist)
     if (isLeft) {
-        glRotatef(leftHandRotAngle, 0, 0, 1);
+        glRotatef(leftHandRotAngle + walkWristRoll, 0, 0, 1);
     } else {
-        glRotatef(-rightHandRotAngle, 0, 0, 1);
+        glRotatef(-(rightHandRotAngle + walkWristRoll), 0, 0, 1);
     }
 
     // Hand palm
     float knuckleRx=0.06f, knuckleRy=0.025f, handLength=0.16f;
     glRotatef(isLeft?5:-5,0,1,0);
     glRotatef(-5,1,0,0);
+    if (!isShadowPass) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texSkin);
+        glColor3f(1.0f, 1.0f, 1.0f);
+    }
     drawProceduralArmPart(handLength,wristRx,wristRy,knuckleRx,knuckleRy,30,20,0.01f,0.5f);
 
     glPushMatrix();
@@ -3012,36 +3441,36 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part)
 void drawLeftArm()
 {
     glPushMatrix();
-    glTranslatef(-0.58f, 1.24f, 0.04f); // Set origin to ball joint center
+    glTranslatef(-0.47f, 1.24f, 0.04f); // Set origin to ball joint center
     
     // 1. Draw Static shoulder part (connector) — not affected by arm rotation
     glPushMatrix();
     glRotatef(90, 1, 0, 0); 
-    drawProceduralArmBase(true, leftFingerProgress, 0); // part 0 = static
+    drawProceduralArmBase(true, leftFingerProgress, 0, leftElbowAngle); // part 0 = static
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
     glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0); 
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(true, leftFingerProgress, 1); // part 1 = rotating
+    drawProceduralArmBase(true, leftFingerProgress, 1, leftElbowAngle); // part 1 = rotating
     glPopMatrix();
 }
 
 void drawRightArm()
 {
     glPushMatrix();
-    glTranslatef(0.58f, 1.24f, 0.04f); // Set origin to ball joint center
+    glTranslatef(0.47f, 1.24f, 0.04f); // Set origin to ball joint center
 
     // 1. Draw Static shoulder part (connector) — not affected by arm rotation
     glPushMatrix();
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, rightFingerProgress, 0); // part 0 = static
+    drawProceduralArmBase(false, rightFingerProgress, 0, rightElbowAngle); // part 0 = static
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
     glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0);
     glRotatef(90, 1, 0, 0);
-    drawProceduralArmBase(false, rightFingerProgress, 1); // part 1 = rotating
+    drawProceduralArmBase(false, rightFingerProgress, 1, rightElbowAngle); // part 1 = rotating
     glPopMatrix();
 }
 
@@ -3063,8 +3492,8 @@ CrossSection sections[SEC_COUNT] = {
     { 0.3f, 0.47f,0.32f,-0.06f},
     { 0.6f, 0.31f,0.21f, 0.02f},
     { 0.9f, 0.34f,0.24f, 0.08f},
-    { 1.15f,0.40f,0.26f, 0.10f},
-    { 1.35f,0.46f,0.21f, 0.03f},
+    { 1.15f,0.38f,0.26f, 0.10f},
+    { 1.35f,0.41f,0.21f, 0.03f},
     { 1.42f,0.22f,0.18f, 0.00f},
     { 1.58f,0.13f,0.13f,-0.04f},
     { 1.80f,0.13f,0.13f,-0.04f}
@@ -3170,8 +3599,8 @@ void drawDressMesh()
             auto applyGrad=[&](float f){
                 float t=f*1.5f; if(t>1)t=1;
                 if (isWarmClothing) {
-                    // Golden/Orange gradient
-                    glColor3f(shade, (0.75f + t*0.25f)*shade, (0.1f + t*0.4f)*shade);
+                    // Pure White/Light Gray gradient (removing gold)
+                    glColor3f(shade, shade, shade);
                 } else {
                     glColor3f((0.40f+t*0.60f)*shade,(0.65f+t*0.35f)*shade,shade);
                 }
@@ -3227,7 +3656,11 @@ void drawDressMesh()
             getDressTorsoVertex(z1,theta,0.035f,px1,py1,pz1);
             getDressTorsoNormal(z1,theta,0.035f,nx1,ny1,nz1);
             float shade=0.85f+0.15f*cos(theta);
-            glColor3f(0.9f*shade,0.75f*shade,0.2f*shade);
+            if (isWarmClothing) {
+                glColor3f(0.95f*shade, 0.95f*shade, 0.98f*shade); // Silver/White
+            } else {
+                glColor3f(0.9f*shade,0.75f*shade,0.2f*shade); // Gold
+            }
             glNormal3f(nx2,ny2,nz2); glVertex3f(px2,py2,pz2);
             glNormal3f(nx1,ny1,nz1); glVertex3f(px1,py1,pz1);
         }
@@ -3236,7 +3669,8 @@ void drawDressMesh()
     drawIrregularBelt(false); drawIrregularBelt(true);
 
     // 3b. Centre emblem
-    glColor3f(0.9f,0.75f,0.2f);
+    if (isWarmClothing) glColor3f(0.95f, 0.95f, 0.98f);
+    else                glColor3f(0.9f, 0.75f, 0.2f);
     float cZ=0.72f,cTheta=3.14159f*0.5f;
     float pTop[3],pBot[3],pL[3],pR[3],pC[3];
     getDressTorsoVertex(0.88f,cTheta,0.04f,pTop[0],pTop[1],pTop[2]);
@@ -3287,6 +3721,8 @@ void drawDressMesh()
         }
         glEnd();
     };
+    if (isWarmClothing) glColor3f(0.95f, 0.95f, 0.98f);
+    else                glColor3f(0.9f,0.75f,0.2f);
     int sides[]={-1,1};
     for(int i=0;i<2;i++){
         float dir=(float)sides[i];
@@ -3342,14 +3778,16 @@ void drawDressMesh()
     };
 
     // Dark blue straps
-    glColor3f(0.04f,0.15f,0.45f);
+    if (isWarmClothing) glColor3f(0.85f, 0.1f, 0.05f); // Red
+    else                glColor3f(0.04f, 0.15f, 0.45f); // Blue
     for(int i=0;i<2;i++){
         float dir=(float)sides[i];
         drawTopCurve(1.23f+0.03f,0.08f*dir,1.15f,0.65f*dir,1.18f,0.40f*dir,0.06f,0.02f);
     }
 
     // Collar rings
-    glColor3f(0.85f,0.7f,0.15f);
+    if (isWarmClothing) glColor3f(0.95f, 0.95f, 0.98f);
+    else                glColor3f(0.85f,0.7f,0.15f);
     auto drawCollarRings=[&](){
         glBegin(GL_QUAD_STRIP);
         for(int j=0;j<=slices;j++){
@@ -3388,7 +3826,8 @@ void drawDressMesh()
     }
 
     // Blue gems
-    glColor3f(0.3f,0.5f,0.95f);
+    if (isWarmClothing) glColor3f(0.95f, 0.15f, 0.1f); // Red gems
+    else                glColor3f(0.3f,0.5f,0.95f); // Blue gems
     float g1Z=1.27f,g1Th=0.04f,g1H=0.04f;
     glBegin(GL_POLYGON);
     float gn[3]; getDressTorsoNormal(g1Z,cTheta,0.035f,gn[0],gn[1],gn[2]);
@@ -3411,12 +3850,18 @@ void drawDressMesh()
 
     // 5. Skirt layers
     struct Layer{float zMin,flareMax,color[3];int folds;float foldDepth;};
-    Layer layers[4]={
-        {-1.0f,0.28f,{0.1f,0.3f,0.8f},8,0.15f},
-        {-0.7f,0.22f,{0.6f,0.75f,0.95f},7,0.12f},
-        {-0.4f,0.15f,{1.0f,1.0f,1.0f},6,0.08f},
-        {-0.1f,0.08f,{0.05f,0.15f,0.35f},5,0.04f}
-    };
+    Layer layers[4];
+    if (isWarmClothing) {
+        layers[0] = {-1.0f,0.28f,{0.85f,0.1f,0.1f},8,0.15f};    // Red
+        layers[1] = {-0.7f,0.22f,{1.0f,0.5f,0.2f},7,0.12f};     // Orange
+        layers[2] = {-0.4f,0.15f,{1.0f,1.0f,1.0f},6,0.08f};     // White
+        layers[3] = {-0.1f,0.08f,{1.0f,0.9f,0.5f},5,0.04f};     // Light Yellow
+    } else {
+        layers[0] = {-1.0f,0.28f,{0.1f,0.3f,0.8f},8,0.15f};
+        layers[1] = {-0.7f,0.22f,{0.6f,0.75f,0.95f},7,0.12f};
+        layers[2] = {-0.4f,0.15f,{1.0f,1.0f,1.0f},6,0.08f};
+        layers[3] = {-0.05f,0.08f,{0.05f,0.15f,0.35f},5,0.04f};
+    }
     for(int l=0;l<4;l++){
         glColor3fv(layers[l].color);
         int skirtStacks=20;
@@ -3453,7 +3898,8 @@ void drawDressMesh()
     }
 
     // 6. Golden skirt accents
-    glColor3f(0.85f,0.7f,0.15f);
+    if (isWarmClothing) glColor3f(0.95f, 0.95f, 0.98f);
+    else                glColor3f(0.85f,0.7f,0.15f);
     for(int i=0;i<6;i++){
         float theta=i/6.0f*2*3.14159f;
         float zSkirtMax=0.55f,zSkirtMin=layers[3].zMin;
@@ -3550,12 +3996,25 @@ void drawPlanarShadow()
     glPushMatrix();
     
     // Lift slightly to avoid z-buffer fighting
-    glTranslatef(0.0f, 0.01f, 0.0f);
+    // DYNAMIC HEIGHT: Detect if on stone path (y=0.12) or grass (y=0.0)
+    float shadowLiftY = 0.01f;
+    if (abs(charX) < 2.9f && charZ < 22.0f && charZ > -157.0f) {
+        shadowLiftY = 0.13f; // Just above stone path
+    }
+    glTranslatef(0.0f, shadowLiftY, 0.0f);
 
-    // Made the shadow longer by moving artificial light closer to original
-    float sLightX = lightX * 0.9f;
-    float sLightY = lightY * 1.4f;
-    float sLightZ = lightZ * 0.9f;
+    // Use daytime sun or night-time moon for shadow projection
+    float sLightX, sLightY, sLightZ;
+    if (!isNight) {
+        sLightX = lightX * 0.9f;
+        sLightY = lightY * 1.4f;
+        sLightZ = lightZ * 0.9f;
+    } else {
+        // Position light source near the Giant Moon to cast shadows forward
+        sLightX = 0.0f;
+        sLightY = 60.0f;
+        sLightZ = -120.0f;
+    }
 
     // Squish matrix for light onto y=0 plane
     GLfloat matrix[16] = {
@@ -3567,7 +4026,7 @@ void drawPlanarShadow()
 
     glMultMatrixf(matrix);
 
-    // Shadow state: Force pure black unconditionally using the lighting pipeline
+    // Shadow state: Force shadow color using the lighting pipeline
     glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_CURRENT_BIT);
     
     glEnable(GL_LIGHTING);
@@ -3578,10 +4037,16 @@ void drawPlanarShadow()
     glDisable(GL_COLOR_MATERIAL); // Critical: Ignore all glColor3f calls inside the character meshes
     glDisable(GL_TEXTURE_2D);
 
+    // Stencil Masking: Prevent shadow overlapping "darkening" artifacts
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_EQUAL, 0, 0xFF); // Test: only draw where stencil value is 0
+    glStencilOp(GL_KEEP, GL_KEEP, GL_INCR); // Op: Increment to 1 after drawing a pixel
+
     // Calculate shadow color based on isNight
     GLfloat shadowColor[4];
     if (isNight) {
-        shadowColor[0] = 0.01f; shadowColor[1] = 0.01f; shadowColor[2] = 0.04f; shadowColor[3] = 1.0f; 
+        // Deep blue shadow for night-time
+        shadowColor[0] = 0.04f; shadowColor[1] = 0.04f; shadowColor[2] = 0.12f; shadowColor[3] = 1.0f; 
     } else {
         // Slightly lighter grey for daytime
         shadowColor[0] = 0.12f; shadowColor[1] = 0.12f; shadowColor[2] = 0.12f; shadowColor[3] = 1.0f;
@@ -3636,13 +4101,12 @@ void drawHeadAndHair() {
     // Internal base model offset (centers the mesh)
     glTranslatef(0.0f, -0.2f, -0.5f);
 
+    glColor3f(1.0f, 1.0f, 1.0f);
     if (!isWireframe && !isShadowPass) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, texHeadObj);
-        glColor3f(1.0f, 1.0f, 1.0f);
     } else {
         glDisable(GL_TEXTURE_2D);
-        // During shadows, we use the shadow color set by drawPlanarShadow()
     }
     
     drawHeadOBJGeometry();
@@ -3680,70 +4144,59 @@ void drawHeadAndHair() {
 void drawCharacter()
 {
     glPushMatrix();
-    glTranslatef(charX, CHAR_Y, charZ);  // Move character in world
+    glTranslatef(charX, CHAR_Y + walkBobY, charZ);  // Move character in world with vertical bobbing
     glRotatef(charRotation, 0.0f, 1.0f, 0.0f); // Rotate character
     glScalef(CHARACTER_BODY_SCALE, CHARACTER_BODY_SCALE, CHARACTER_BODY_SCALE); // Apply body scale
 
     if (isShadowPass) {
-        // SHADOW OPTIMIZATION: 
-        // Use the real limbs and body for the correct animated shape, 
-        // but completely skip the complex dress mesh to eliminate lagging.
-        
-        // ---- Body/Dress Proxy ----
+        // SHADOW pass
         glPushMatrix();
         glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
         glRotatef(180.0f, 0.0f, 0.0f, 1.0f); 
-        drawBodyMesh(); // Torso
-        drawHeadAndHair(); // Head shadow proxy
+        if (showBody) drawBodyMesh(); 
+        if (showHead) drawHeadAndHair(); 
         
-        // Super-fast cone to represent the dress skirt
-        GLUquadric* q = gluNewQuadric();
-        glTranslatef(0.0f, 0.0f, -0.4f);
-        gluCylinder(q, 0.3f, 0.8f, 1.0f, 12, 1);
-        gluDeleteQuadric(q);
-        glPopMatrix();
-
-        // ---- Legs ----
-        glTranslatef(0.0f, -1.53f, 0.0f);   
-        drawLeftLeg();
-        drawRightLeg();
-
-        // ---- Arms ----
-        glTranslatef(0.0f, 1.53f, 0.0f);    
-        drawLeftArm();
-        drawRightArm();
-    } else {
-        // ---- Body (Z-up model, rotate so Z becomes world Y) ----
-        glPushMatrix();
-        glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-        glRotatef(180.0f, 0.0f, 0.0f, 1.0f); // Reverse body direction to face camera
-        if (isWireframe) {
-            drawBodyMesh();
-            drawDressMesh();
-            drawHeadAndHair();
-        } else if (cachedBodyList == 0) {
-            cachedBodyList = glGenLists(1);
-            glNewList(cachedBodyList, GL_COMPILE);
-            drawBodyMesh();
-            drawDressMesh();
-            glEndList();
-            glCallList(cachedBodyList);
-            drawHeadAndHair();
-        } else {
-            glCallList(cachedBodyList);
-            drawHeadAndHair();
+        if (showBody) {
+            GLUquadric* q = gluNewQuadric();
+            glTranslatef(0.0f, 0.0f, -0.4f);
+            gluCylinder(q, 0.3f, 0.8f, 1.0f, 12, 1);
+            gluDeleteQuadric(q);
         }
         glPopMatrix();
 
-        // ---- Legs (Y-up, origin at hip Y=1.53, extend downward) ----
-        glTranslatef(0.0f, -1.53f, 0.0f);   // re-origin to hip joint
-        drawLeftLeg();
-        drawRightLeg();
+        glTranslatef(0.0f, -1.53f, 0.0f);   
+        if (showLegs) { drawLeftLeg(); drawRightLeg(); }
 
-        // ---- Arms (Y-up, origin at shoulder; shoulder ≈ body Z=1.35 above hip) ----
-        glTranslatef(0.0f, 1.53f, 0.0f);    // undo the leg offset
-        drawLeftArm();
-        drawRightArm();
+        glTranslatef(0.0f, 1.53f, 0.0f);    
+        if (showArms) { drawLeftArm(); drawRightArm(); }
+    } else {
+        // MAIN pass
+        glPushMatrix();
+        glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(180.0f, 0.0f, 0.0f, 1.0f); 
+        if (showBody) {
+            if (isWireframe) {
+                drawBodyMesh();
+                drawDressMesh();
+            } else if (cachedBodyList == 0) {
+                cachedBodyList = glGenLists(1);
+                glNewList(cachedBodyList, GL_COMPILE);
+                drawBodyMesh();
+                drawDressMesh();
+                glEndList();
+                glCallList(cachedBodyList);
+            } else {
+                glCallList(cachedBodyList);
+            }
+        }
+        if (showHead) drawHeadAndHair();
+        glPopMatrix();
+
+        glTranslatef(0.0f, -1.53f, 0.0f);   
+        if (showLegs) { drawLeftLeg(); drawRightLeg(); }
+
+        glTranslatef(0.0f, 1.53f, 0.0f);    
+        if (showArms) { drawLeftArm(); drawRightArm(); }
     }
 
     glPopMatrix();
@@ -3764,12 +4217,17 @@ void display()
     }
 
     setupLighting(); // Update light intensities
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     
-    // Update projection
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity(); // Root identity for current context before viewport calls? No, per function.
+
+    // Reverted to standard full-window viewport
+    glViewport(0, 0, windowWidth, windowHeight);
+
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    float aspect = 800.0f / 600.0f;
+    float aspect = (float)windowWidth / (float)windowHeight;
     if (isPerspective) {
         gluPerspective(45.0f, aspect, 0.1f, 200.0f);
     } else {
@@ -3777,7 +4235,6 @@ void display()
         glOrtho(-size * aspect, size * aspect, -size, size, 0.1f, 200.0f);
     }
     glMatrixMode(GL_MODELVIEW);
-
     glLoadIdentity();
 
     updateCamera();
@@ -3798,43 +4255,32 @@ void display()
 
     if (!isWireframe) {
         // Normal mode: draw sky, shadow, and textured character
-        drawBackground();
+        if (showBackground) drawBackground();
         drawPlanarShadow();
         drawCharacter();
     } else {
         // ---- Wireframe / X-ray Mode (press I to toggle) ----
         // Background is already cleared to near-black via glClearColor above.
-        // All glEnable(GL_TEXTURE_2D) calls in draw functions are guarded with
-        // !isWireframe, so textures stay OFF throughout the character draw.
-        // A pure emission material forces every fragment to the same bright cyan
-        // regardless of internal glColor3f() calls (GL_COLOR_MATERIAL is off).
+        
+        glPushAttrib(GL_ENABLE_BIT | GL_POLYGON_BIT | GL_LINE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT);
 
-        glPushAttrib(GL_ENABLE_BIT | GL_POLYGON_BIT | GL_LINE_BIT | GL_CURRENT_BIT
-                   | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_LIGHTING_BIT);
-
-        // Disable everything that could colour or modulate the output
         glDisable(GL_TEXTURE_2D);
-        glDisable(GL_COLOR_MATERIAL);
-        glDisable(GL_BLEND);        // fully opaque — easiest to see
-
+        glEnable(GL_COLOR_MATERIAL);
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+        
         // Wireframe polygon edges only
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         glLineWidth(1.3f);
 
-        // Force ALL fragments to a single bright colour via emission.
-        // With GL_LIGHTING on, every light off, and only emission non-zero,
-        // the rasterised colour = emission regardless of vertex colours.
+        // Keep standard lighting enabled but remove forced emission
         glEnable(GL_LIGHTING);
-        glDisable(GL_LIGHT0);
+        setupLighting(); // Reset to default character lighting
+        
+        // Ensure no forced emission or unique material overrides the vertex colors
         GLfloat zero[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        GLfloat emit[4] = { 0.35f, 0.95f, 1.0f, 1.0f }; // vivid cyan, fully opaque
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, zero);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT,  zero);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE,  zero);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, zero);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emit);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, zero);
 
-        // Draw character as wireframe on the dark background
+        // Draw character as wireframe
         drawCharacter();
 
         glPopAttrib();
@@ -3856,34 +4302,69 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
     wc.style         = CS_HREDRAW | CS_VREDRAW;
     if (!RegisterClassEx(&wc)) return false;
 
+    // Register Control Panel Class
+    WNDCLASSEX wc2 = wc;
+    wc2.lpfnWndProc = ControlWindowProcedure;
+    wc2.lpszClassName = "ControlPanelClass";
+    if (!RegisterClassEx(&wc2)) return false;
+
+    // Create Main Window
     HWND hWnd = CreateWindow(WINDOW_TITLE, WINDOW_TITLE, WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
                              NULL, NULL, wc.hInstance, NULL);
 
+    // Create Control Panel Window (placed next to main)
+    hControlWnd = CreateWindow("ControlPanelClass", "Character Controls", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                              810, 100, 280, 600,
+                              NULL, NULL, wc.hInstance, NULL);
+
     HDC hdc = GetDC(hWnd);
     initPixelFormat(hdc);
     HGLRC hglrc = wglCreateContext(hdc);
+    
+    // Setup Control Window OpenGL
+    hControlDC = GetDC(hControlWnd);
+    initPixelFormat(hControlDC);
+    hControlRC = wglCreateContext(hControlDC);
+    
+    // Share lists (fonts) between contexts
+    wglShareLists(hglrc, hControlRC);
+
     if (!wglMakeCurrent(hdc, hglrc)) return false;
 
     initOpenGL();
     setupLighting();
+    initFont(hdc);
+
+    // Initial window size
+    RECT rect;
+    if (GetClientRect(hWnd, &rect)) {
+        windowWidth = rect.right - rect.left;
+        windowHeight = rect.bottom - rect.top;
+    }
+    
+    if (GetClientRect(hControlWnd, &rect)) {
+        controlWidth = rect.right - rect.left;
+        controlHeight = rect.bottom - rect.top;
+    }
 
     // Load all textures
-    texGrass        = loadBMP("grass.bmp");
-    texSkin         = loadBMP("skin.bmp");
-    texFabric       = loadBMP("fabric.bmp");
-    texGold         = loadBMP("gold.bmp");
-    texWhiteSleeve  = loadBMP("white_sleeve.bmp");
-    texWhiteLeather = loadBMP("white_leather.bmp");
-    texDarkLeather  = loadBMP("dark_leather.bmp");
-    texWeaponMetal  = loadBMP("metal.bmp");
-    texWeaponWood   = loadBMP("wood.bmp");
-    texWeaponChain  = loadBMP("chain.bmp");
-    texFanWood      = loadBMP("fan_wood.bmp");
-    texFan          = loadBMP("fan.bmp");
-    texHeadObj      = loadBMP("head.bmp");
+    texGrass        = loadBMP("Textures/grass.bmp");
+    texSkin         = loadBMP("Textures/skin.bmp");
+    texFabric       = loadBMP("Textures/fabric.bmp");
+    texGold         = loadBMP("Textures/gold.bmp");
+    texWhiteSleeve  = loadBMP("Textures/white_sleeve.bmp");
+    texWhiteLeather = loadBMP("Textures/white_leather.bmp");
+    texDarkLeather  = loadBMP("Textures/dark_leather.bmp");
+    texWeaponMetal  = loadBMP("Textures/metal.bmp");
+    texWeaponWood   = loadBMP("Textures/wood.bmp");
+    texWeaponChain  = loadBMP("Textures/chain.bmp");
+    texFanWood      = loadBMP("Textures/fan_wood.bmp");
+    texFan          = loadBMP("Textures/fan.bmp");
+    texHeadObj      = loadBMP("Textures/head.bmp");
 
     ShowWindow(hWnd, nCmdShow);
+    ShowWindow(hControlWnd, SW_SHOW);
 
     MSG msg;
     ZeroMemory(&msg, sizeof(msg));
@@ -3898,8 +4379,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
         }
 
         updateAnimation();
+        
+        // Render Main Window
+        wglMakeCurrent(hdc, hglrc);
         display();
         SwapBuffers(hdc);
+
+        // Render Control Window
+        wglMakeCurrent(hControlDC, hControlRC);
+        drawOverlayUI();
+        SwapBuffers(hControlDC);
     }
 
     UnregisterClass(WINDOW_TITLE, wc.hInstance);

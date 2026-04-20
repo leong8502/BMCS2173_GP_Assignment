@@ -36,6 +36,7 @@ float cameraX, cameraY, cameraZ;
 //--------------------------------
 // No animation currently
 bool isWireframe = false;
+bool isWarmClothing = false;
 
 //--------------------------------
 // Texture variables
@@ -119,6 +120,11 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		case 'I':
 		case 'i':
 			isWireframe = !isWireframe;
+			break;
+
+		case 'B':
+		case 'b':
+			isWarmClothing = !isWarmClothing;
 			break;
 
         //--------------------------------
@@ -326,13 +332,20 @@ void emitT(Vec3 p0, Vec3 n0, Vec3 p1, Vec3 n1, Vec3 p2, Vec3 n2) {
 }
 
 void setHairColorGradient(float shade, float tint, float v, int bright) {
-    // Dark Blue to Dark Purple gradient
-    float rTop = 0.05f, gTop = 0.12f, bTop = 0.55f;
-    float rBot = 0.35f, gBot = 0.08f, bBot = 0.50f;
+    float rTop, gTop, bTop, rBot, gBot, bBot;
+    if (isWarmClothing) {
+        // Vibrant Red to Deep Maroon gradient
+        rTop = 0.90f; gTop = 0.10f; bTop = 0.05f;
+        rBot = 0.35f; gBot = 0.02f; bBot = 0.02f;
+    } else {
+        // Original Blue to Purple gradient
+        rTop = 0.05f, gTop = 0.12f, bTop = 0.55f;
+        rBot = 0.35f, gBot = 0.08f, bBot = 0.50f;
+    }
 
     if (bright) {
-        rTop *= 1.30f; gTop *= 1.30f; bTop *= 1.30f;
-        rBot *= 1.30f; gBot *= 1.30f; bBot *= 1.30f;
+        rTop = min(1.0f, rTop * 1.30f); gTop = min(1.0f, gTop * 1.30f); bTop = min(1.0f, bTop * 1.30f);
+        rBot = min(1.0f, rBot * 1.30f); gBot = min(1.0f, gBot * 1.30f); bBot = min(1.0f, bBot * 1.30f);
     }
 
     float r = rTop + (rBot - rTop) * v;
@@ -1188,8 +1201,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
 
 	initOpenGL();
 	
-	texSkin = loadBMP("skin.bmp");
-	texHeadObj = loadBMP("head1.bmp"); // load the converted texture
+	texSkin = loadBMP("Textures/skin.bmp");
+	texHeadObj = loadBMP("Textures/head.bmp"); // updated to match existing texture file
 
 	ShowWindow(hWnd, nCmdShow);
 

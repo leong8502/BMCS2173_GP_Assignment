@@ -645,8 +645,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
 	//--------------------------------
 	initOpenGL();
 	//setupLighting();
-	textureWoodID = loadBMP("fan_wood.bmp");
-	textureFanID = loadBMP("fan.bmp");
+	textureWoodID = loadBMP("Textures/fan_wood.bmp");
+	textureFanID = loadBMP("Textures/fan.bmp");
 
 	//--------------------------------
 	//	End initialization
