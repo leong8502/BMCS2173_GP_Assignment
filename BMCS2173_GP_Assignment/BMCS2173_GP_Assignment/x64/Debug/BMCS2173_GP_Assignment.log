@@ -1,2 +1,26 @@
 ﻿  main.cpp
-  BMCS2173_GP_Assignment.vcxproj -> C:\Users\Xiang\Downloads\BMCS2173_GP_Assignment\x64\Debug\BMCS2173_GP_Assignment.exe
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(2531,36): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(2533,31): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(2641,19): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(2646,19): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(2928,17): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(2932,17): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3237,21): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3546,18): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3547,18): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3548,16): warning C4244: '-=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3550,17): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3551,17): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3552,16): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3575,18): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3576,18): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3577,16): warning C4244: '-=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3579,17): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3580,17): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3581,16): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3613,28): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3615,26): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3650,28): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3651,28): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\main.cpp(3677,26): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+  BMCS2173_GP_Assignment.vcxproj -> C:\Users\lauai\Documents\GitHub\BMCS2173_GP_Assignment\BMCS2173_GP_Assignment\x64\Debug\BMCS2173_GP_Assignment.exe

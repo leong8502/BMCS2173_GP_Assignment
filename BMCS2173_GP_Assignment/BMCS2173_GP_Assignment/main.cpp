@@ -60,6 +60,8 @@ struct HairPanel {
 float cameraAngle = 0.0f;
 float cameraHeight = 3.5f;
 float cameraDistance = 8.0f;
+float camOffsetX = 0.0f;
+float camOffsetY = 0.0f;
 float cameraX, cameraY, cameraZ;
 float cameraViewMatrix[16];
 
@@ -166,7 +168,7 @@ GLuint fontBase = 0;
 HWND hControlWnd = NULL;
 HDC hControlDC = NULL;
 HGLRC hControlRC = NULL;
-int controlWidth = 260;
+int controlWidth = 340;
 int controlHeight = 600;
 int uiControlMouseX = 0;
 int uiControlMouseY = 0;
@@ -311,8 +313,8 @@ void drawOverlayUI() {
             if (!toggleDebounce) { 
                 var = !var; 
                 toggleDebounce = true; 
-                // Invalidate body cache if body visibility changes
-                if (&var == &showBody && cachedBodyList != 0) {
+                // Invalidate body cache if body visibility or lighting changes
+                if ((&var == &showBody || &var == &isNight) && cachedBodyList != 0) {
                     glDeleteLists(cachedBodyList, 1);
                     cachedBodyList = 0;
                 }
@@ -320,14 +322,14 @@ void drawOverlayUI() {
         }
     };
 
-    toggle(showBackground, 20, yOffset, 220, 30, "Show Background"); yOffset += 45;
+    toggle(isNight, 20, yOffset, 280, 30, isNight ? "Mode: Night" : "Mode: Day"); yOffset += 45;
 
     glColor3f(0.6f, 0.7f, 1.0f);
     drawText(20, yOffset, "ISOLATE COMPONENT");
     yOffset += 30;
 
     auto isolate = [&](const char* label, bool& targetVar, float h, float d) {
-        if (drawButton(20, yOffset, 220, 30, label, targetVar)) {
+        if (drawButton(20, yOffset, 280, 30, label, targetVar)) {
             if (!toggleDebounce) {
                 showHead = showBody = showArms = showLegs = false;
                 targetVar = true;
@@ -340,7 +342,7 @@ void drawOverlayUI() {
         yOffset += 35;
     };
 
-    if (drawButton(20, yOffset, 220, 30, "Full View (All)", (showHead && showBody && showArms && showLegs))) {
+    if (drawButton(20, yOffset, 280, 30, "Full View (All)", (showHead && showBody && showArms && showLegs))) {
         if (!toggleDebounce) {
             showHead = showBody = showArms = showLegs = true;
             cameraHeight = 3.5f;
@@ -351,17 +353,17 @@ void drawOverlayUI() {
     }
     yOffset += 35;
 
-    isolate("Head (head8.cpp)",  showHead, 2.0f, 2.5f);
-    isolate("Body (body.cpp)",   showBody, 1.6f, 4.5f);
-    isolate("Arms (arms.cpp)",   showArms, 1.6f, 4.5f);
-    isolate("Legs (legs.cpp)",   showLegs, 0.8f, 3.5f);
+    isolate("Head",  showHead, 2.0f, 2.5f);
+    isolate("Body",   showBody, 1.6f, 4.5f);
+    isolate("Arms",   showArms, 1.6f, 4.5f);
+    isolate("Legs",   showLegs, 0.8f, 3.5f);
 
     yOffset += 20;
     glColor3f(0.6f, 0.7f, 1.0f);
     drawText(20, yOffset, "WEAPONS");
     yOffset += 30;
 
-    if (drawButton(20, yOffset, 220, 30, "Meteor Hammer", weapon1_status)) {
+    if (drawButton(20, yOffset, 280, 30, "Hammer of the Wandering Star", weapon1_status)) {
         if (!toggleDebounce) {
             weapon1_status = !weapon1_status;
             if (weapon1_status) weapon2_status = false;
@@ -371,7 +373,7 @@ void drawOverlayUI() {
     }
     yOffset += 35;
 
-    if (drawButton(20, yOffset, 220, 30, "Imperial Fan", weapon2_status)) {
+    if (drawButton(20, yOffset, 280, 30, "Frostmoon folding fan", weapon2_status)) {
         if (!toggleDebounce) {
             weapon2_status = !weapon2_status;
             if (weapon2_status) weapon1_status = false;
@@ -387,9 +389,9 @@ void drawOverlayUI() {
     drawText(20, yOffset, "MODES");
     yOffset += 30;
 
-    toggle(isWireframe, 20, yOffset, 220, 30, "Polygon View"); yOffset += 35;
+    toggle(isWireframe, 20, yOffset, 280, 30, "Polygon View"); yOffset += 35;
     
-    if (drawButton(20, yOffset, 220, 30, lightingMode == 1 ? "Mode: Ambient" : "Mode: Diffuse", true)) {
+    if (drawButton(20, yOffset, 280, 30, lightingMode == 1 ? "Mode: Ambient" : "Mode: Diffuse", true)) {
         if (!toggleDebounce) {
             lightingMode = (lightingMode == 1) ? 2 : 1;
             toggleDebounce = true;
@@ -442,18 +444,17 @@ void setupLightingHead() {
     GLfloat ambientLight[] = { 0.20f, 0.20f, 0.20f, 1.0f };
     glLightfv(GL_LIGHT0, GL_AMBIENT, ambientLight);
 
-    GLfloat lightPos0[] = { 4.0f, 5.0f, 5.0f, 1.0f };
-    GLfloat white[] = { 0.8f, 0.8f, 0.8f, 1.0f };    // Bright for ambient mode
-    GLfloat gray[]  = { 0.15f, 0.15f, 0.15f, 1.0f }; // Dull for diffuse mode
+    // Base colors for lighting modes (Day defaults - optimized for head vibrancy)
+    GLfloat white[] = { 0.55f, 0.55f, 0.52f, 1.0f };    // Vibrant ambient
+    GLfloat gray[]  = { 0.48f, 0.45f, 0.40f, 1.0f };    // Detailed diffuse
     GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
+    // Use global light positions from setupLighting() to ensure character-wide alignment
     if (isNight) {
-        white[0] = 0.40f; white[1] = 0.40f; white[2] = 0.50f;
-        gray[0]  = 0.05f; gray[1]  = 0.05f; gray[2]  = 0.08f;
+        // Night values (Matches exactly with global body lighting in setupLighting)
+        white[0] = 0.10f; white[1] = 0.10f; white[2] = 0.18f; 
+        gray[0]  = 0.25f; gray[1]  = 0.25f; gray[2]  = 0.40f;
     }
-
-    glLightfv(GL_LIGHT0, GL_POSITION, lightPos0);
-    GLfloat lightPos1[] = { -4.0f, 2.0f, -1.0f, 1.0f };
     
     if (lightingMode == 1) { // Ambient mode (Face is bright)
         glLightfv(GL_LIGHT0, GL_AMBIENT, white); 
@@ -476,11 +477,11 @@ void setupLightingHead() {
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, black);
 
         glLightfv(GL_LIGHT1, GL_AMBIENT, black);
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, gray);
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, isNight ? black : gray);
         glLightfv(GL_LIGHT1, GL_SPECULAR, black);
 
         glLightfv(GL_LIGHT2, GL_AMBIENT, black);
-        glLightfv(GL_LIGHT2, GL_DIFFUSE, gray);
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, isNight ? black : gray);
         glLightfv(GL_LIGHT2, GL_SPECULAR, black);
     }
 
@@ -851,8 +852,9 @@ void drawRabbitEars() {
             float earWidth2 = (f2 < peakPos) ? (maxWidth * (0.35f + 0.65f * powf(f2 / peakPos, 0.7f))) : (maxWidth * (0.30f + 0.70f * cosf((f2 - peakPos) / (1.0f - peakPos) * 3.14159f * 0.5f)));
             float curve1 = 0.12f * f1 * f1; float curve2 = 0.12f * f2 * f2;
             float thick1 = 0.035f * sinf(f1 * 3.14159f * 0.85f + 0.15f); float thick2 = 0.035f * sinf(f2 * 3.14159f * 0.85f + 0.15f);
+            float base = isNight ? 0.60f : 0.72f; 
             if (i == stacks - 1) {
-                glBegin(GL_TRIANGLE_FAN); glColor3f(1.0f, 1.0f, 1.0f); glNormal3f(0, 0, 1); glVertex3f(0, -curve2 - 0.005f, z2 + earWidth2 * 0.4f);
+                glBegin(GL_TRIANGLE_FAN); glColor3f(base, base, base); glNormal3f(0, 0, 1); glVertex3f(0, -curve2 - 0.005f, z2 + earWidth2 * 0.4f);
                 for (int j = 0; j <= slices; j++) {
                     float th = (float)j / slices * TWO_PI;
                     glNormal3f(cosf(th) * 0.3f, sinf(th) * 0.3f, 0.9f); glVertex3f(earWidth1 * cosf(th), thick1 * sinf(th) - curve1, z1);
@@ -865,7 +867,10 @@ void drawRabbitEars() {
                     float faceFactor = max(0.0f, sinTh - 0.50f) / 0.50f;
                     float hFact = clampf(f1 * 4.0f, 0, 1) * clampf((1.0f - f1) * 3.0f, 0, 1);
                     float pinkIntensity = faceFactor * hFact;
-                    glColor3f(1.0f, 1.0f - 0.30f * pinkIntensity, 1.0f - 0.22f * pinkIntensity);
+                    
+                    // Darken the base color during day to prevent saturation from bright ambient lighting
+                    glColor3f(base, base * (1.0f - 0.30f * pinkIntensity), base * (1.0f - 0.22f * pinkIntensity));
+                    
                     float depthMul = 1.0f - 0.55f * pinkIntensity;
                     glNormal3f(cosTh, sinTh * (1.0f - 0.7f * pinkIntensity), 0.15f);
                     glVertex3f(earWidth2 * cosTh, thick2 * depthMul * sinTh - curve2, z2);
@@ -1050,6 +1055,8 @@ void resetAll()
     cameraAngle    = 0.0f;
     cameraHeight   = 3.5f;
     cameraDistance = 8.0f;
+    camOffsetX     = 0.0f;
+    camOffsetY     = 0.0f;
     cameraX = 0.0f; cameraY = 3.5f; cameraZ = 8.0f;
 
     leftArmAngle  = 0.0f; rightArmAngle = 0.0f;
@@ -1176,8 +1183,9 @@ void drawMeteorHammer() {
     glPopMatrix();
 
     // CENTRIFUGAL FORCE OVERRIDE for J animation
-    // Skip hanging down logic if J animation is in full spin
-    bool skipHanging = false;
+    // Skip hanging down logic if J animation is in full spin, OR during shadow pass
+    // (glLoadMatrixf in hanging logic clears the shadow projection matrix)
+    bool skipHanging = isShadowPass; 
     if (jAnimationActive) {
         // Rotation check: after first 180 degrees (roughly 0.5s into a 2s spin)
         if (jAnimProgress > 0.25f) skipHanging = true;
@@ -1500,7 +1508,11 @@ void updateAnimation()
         rightKneeAngle = (rightLegAngle < 0) ? -rightLegAngle * 1.1f : 0.0f;
         
         // Elbow bending: Bends more during the forward swing
-        leftElbowAngle  = 15.0f + sin(walkPhase + 1.5f) * 15.0f * walkWeight;
+        if (weapon1_status || weapon2_status) {
+            leftElbowAngle = 0.0f; // Perfectly straight pose while armed to avoid tilting
+        } else {
+            leftElbowAngle = 15.0f + sin(walkPhase + 1.5f) * 15.0f * walkWeight;
+        }
         rightElbowAngle = 15.0f + sin(walkPhase - 1.5f) * 15.0f * walkWeight;
 
         // Vertical "bobing" effect: character rises slightly twice per cycle (when legs cross)
@@ -1693,23 +1705,28 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         // Camera orbit / height / zoom (or Spotlight direction with SHIFT)
         case VK_LEFT:  
-            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle -= 0.05f; 
-            else spotAngleY -= 2.0f;
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) cameraAngle -= 0.05f; 
+            else if (GetAsyncKeyState(VK_SHIFT) & 0x8000) spotAngleY -= 2.0f;
+            else camOffsetX -= 0.15f;
             break;
         case VK_RIGHT: 
-            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraAngle += 0.05f; 
-            else spotAngleY += 2.0f;
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) cameraAngle += 0.05f; 
+            else if (GetAsyncKeyState(VK_SHIFT) & 0x8000) spotAngleY += 2.0f;
+            else camOffsetX += 0.15f;
             break;
         case VK_UP:    
-            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) cameraHeight += 0.3f; 
-            else spotAngleX -= 2.0f;
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) cameraHeight += 0.3f; 
+            else if (GetAsyncKeyState(VK_SHIFT) & 0x8000) spotAngleX -= 2.0f;
+            else camOffsetY += 0.15f;
             break;
         case VK_DOWN:
-            if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) {
                 cameraHeight -= 0.3f;
                 if (cameraHeight < 0.5f) cameraHeight = 0.5f;
-            } else {
+            } else if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
                 spotAngleX += 2.0f;
+            } else {
+                camOffsetY -= 0.15f;
             }
             break;
         case VK_ADD:    case VK_OEM_PLUS:  cameraDistance -= 0.3f; break;
@@ -2630,8 +2647,8 @@ void drawProceduralLegPart(float length, float topRx, float topRy,
         rx2+=b2; ry2+=b2;
 
         if (isShadowPass) {
-            glColor3f(0.15f, 0.15f, 0.15f);
-            if (isNight) glColor3f(0.01f, 0.01f, 0.02f);
+            glColor3f(0.12f, 0.12f, 0.12f);
+            if (isNight) glColor3f(0.04f, 0.04f, 0.12f);
         }
 
         glBegin(GL_QUAD_STRIP);
@@ -2916,8 +2933,8 @@ void drawProceduralArmPart(float length,
         rx2+=b2; ry2+=b2;
 
         if (isShadowPass) {
-            glColor3f(0.15f, 0.15f, 0.15f);
-            if (isNight) glColor3f(0.01f, 0.01f, 0.02f);
+            glColor3f(0.12f, 0.12f, 0.12f);
+            if (isNight) glColor3f(0.04f, 0.04f, 0.12f);
         }
 
         glBegin(GL_QUAD_STRIP);
@@ -3155,7 +3172,8 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part, float e
     glBindTexture(GL_TEXTURE_2D, texSkin);
 
     // Forearm
-    glRotatef(-5,1,0,0);
+    float effectiveForearmTilt = (isLeft && (weapon1_status || weapon2_status)) ? 0.0f : -5.0f;
+    glRotatef(effectiveForearmTilt, 1, 0, 0);
     float wristRx= 0.065f, wristRy= 0.045f;
     if (!isShadowPass) {
         glEnable(GL_TEXTURE_2D);
@@ -3208,7 +3226,8 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part, float e
 
     // Toggleable Hand/Palm rotation (60 degree twist)
     if (isLeft) {
-        glRotatef(leftHandRotAngle + walkWristRoll, 0, 0, 1);
+        float effectiveWristRoll = (weapon1_status || weapon2_status) ? 0.0f : walkWristRoll;
+        glRotatef(leftHandRotAngle + effectiveWristRoll, 0, 0, 1);
     } else {
         glRotatef(-(rightHandRotAngle + walkWristRoll), 0, 0, 1);
     }
@@ -3216,7 +3235,8 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part, float e
     // Hand palm
     float knuckleRx=0.06f, knuckleRy=0.025f, handLength=0.16f;
     glRotatef(isLeft?5:-5,0,1,0);
-    glRotatef(-5,1,0,0);
+    float effectiveHandTilt = (isLeft && (weapon1_status || weapon2_status)) ? 0.0f : -5.0f;
+    glRotatef(effectiveHandTilt, 1, 0, 0);
     if (!isShadowPass) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, texSkin);
@@ -3326,14 +3346,20 @@ void drawProceduralArmBase(bool isLeft, float* fingerProgress, int part, float e
             // Unwind rotations to align perfectly with Character Root space for forward flight
             glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
             glRotatef(tilt, 0.0f, 0.0f, 1.0f);
-            glRotatef(5.0f, 1.0f, 0.0f, 0.0f);
-            glRotatef(-5.0f, 0.0f, 1.0f, 0.0f);
+            glRotatef(0.0f, 1.0f, 0.0f, 0.0f); // Removed downward tilt for level flight
+            glRotatef(0.0f, 0.0f, 1.0f, 0.0f); // Removed sideways yaw
             glRotatef(-tilt, 0.0f, 0.0f, 1.0f);
             glRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
-            glRotatef(5.0f, 1.0f, 0.0f, 0.0f);
-            glRotatef(10.0f, 0.0f, 1.0f, 0.0f);
+            glRotatef(0.0f, 1.0f, 0.0f, 0.0f); // Removed second downward tilt
+            glRotatef(0.0f, 0.0f, 1.0f, 0.0f); // Removed second sideways yaw
             glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-            glRotatef(leftArmAngle - walkArmSwing, 1.0f, 0.0f, 0.0f);
+            
+            // Sync with drawLeftArm: Arm is stationary when armed, so unwind should also use 0 swing
+            float currentSwing = (weapon1_status || weapon2_status) ? 0.0f : walkArmSwing;
+            glRotatef(leftArmAngle - currentSwing, 1.0f, 0.0f, 0.0f);
+            
+            // Precise neutralization of the vertical bobbing applied to the character root
+            glTranslatef(0.0f, -walkBobY, 0.0f);
 
             if (!isShadowPass) {
                 // 1. Draw existing particles forming the trail
@@ -3450,7 +3476,8 @@ void drawLeftArm()
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
-    glRotatef(-(leftArmAngle - walkArmSwing), 1, 0, 0); 
+    float effectiveSwing = (weapon1_status || weapon2_status) ? 0.0f : walkArmSwing;
+    glRotatef(-(leftArmAngle - effectiveSwing), 1, 0, 0); 
     glRotatef(90, 1, 0, 0);
     drawProceduralArmBase(true, leftFingerProgress, 1, leftElbowAngle); // part 1 = rotating
     glPopMatrix();
@@ -3468,7 +3495,7 @@ void drawRightArm()
     glPopMatrix();
 
     // 2. Apply arm rotation and draw rotating part (now centered on ball joint)
-    glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0);
+    glRotatef(-(rightArmAngle + walkArmSwing), 1, 0, 0); 
     glRotatef(90, 1, 0, 0);
     drawProceduralArmBase(false, rightFingerProgress, 1, rightElbowAngle); // part 1 = rotating
     glPopMatrix();
@@ -4246,8 +4273,8 @@ void display()
         shakeZ = ((rand() % 100) / 50.0f - 1.0f) * 0.15f;
     }
 
-    gluLookAt(cameraX + charX + shakeX, cameraY + shakeY, cameraZ + charZ + shakeZ,
-              charX + shakeX, 1.6 + shakeY, charZ + shakeZ,   // look at character neck/head height
+    gluLookAt(cameraX + charX + shakeX + camOffsetX, cameraY + shakeY + camOffsetY, cameraZ + charZ + shakeZ,
+              charX + shakeX + camOffsetX, 1.6 + shakeY + camOffsetY, charZ + shakeZ,
               0, 1, 0);
 
     // Save camera orientation for world-aligned weapons
@@ -4315,7 +4342,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
 
     // Create Control Panel Window (placed next to main)
     hControlWnd = CreateWindow("ControlPanelClass", "Character Controls", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                              810, 100, 280, 600,
+                              810, 100, controlWidth, controlHeight,
                               NULL, NULL, wc.hInstance, NULL);
 
     HDC hdc = GetDC(hWnd);
