@@ -10,11 +10,53 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <mmsystem.h>
 
 using std::max;
 
+//================================
+// Quadric Pool — intercepts all gluNewQuadric / gluDeleteQuadric
+// calls in existing draw functions without modifying them.
+// A single GLUquadric is created once and reused every frame.
+//================================
+static GLUquadric* _g_sharedQuadric = nullptr;
+
+inline GLUquadric* _pool_gluNewQuadric() {
+    if (!_g_sharedQuadric) {
+        _g_sharedQuadric = gluNewQuadric();
+    }
+    // Reset to safe defaults expected by callers
+    gluQuadricDrawStyle (_g_sharedQuadric, GLU_FILL);
+    gluQuadricNormals   (_g_sharedQuadric, GLU_SMOOTH);
+    gluQuadricTexture   (_g_sharedQuadric, GL_TRUE);
+    return _g_sharedQuadric;
+}
+
+inline void _pool_gluDeleteQuadric(GLUquadric*) {
+    // No-op: quadric lives for the lifetime of the application
+}
+
+// Transparently replace every call in existing functions
+#define gluNewQuadric()      _pool_gluNewQuadric()
+#define gluDeleteQuadric(q)  _pool_gluDeleteQuadric(q)
+
+//================================
+// Texture toggle — intercepts glBindTexture so Shift+E can
+// suppress all texture binds without touching any draw function.
+//================================
+bool noTextureMode = false;
+
+// NOTE: This function is defined BEFORE the #define below,
+// so the glBindTexture call inside it reaches the real OpenGL API.
+inline void _intercept_glBindTexture(GLenum target, GLuint texture) {
+    glBindTexture(target, noTextureMode ? 0u : texture);
+}
+
+#define glBindTexture(target, texture) _intercept_glBindTexture(target, texture)
+
 #pragma comment (lib, "OpenGL32.lib")
 #pragma comment (lib, "GLU32.lib")
+#pragma comment (lib, "winmm.lib")
 #pragma warning(disable:4996)
 
 #define WINDOW_TITLE "Main Character"
@@ -175,6 +217,7 @@ int uiControlMouseY = 0;
 bool uiControlLeftDown = false;
 
 DWORD lastTime = 0;
+ULONGLONG boomScheduledAt = 0; // 0 = not scheduled; set when J key fires
 
 // Fan trailing particles state
 struct FanParticle {
@@ -190,10 +233,13 @@ FanParticle fanParticles[500];
 //================================
 // Textures
 //================================
-GLuint texGrass;        // background ground
+GLuint texGrass;        // background ground (currently active)
+GLuint texSand;         // alternate ground texture
 GLuint texSkin;         // body / arm skin
-GLuint texFabric;       // dark-blue fabric
-GLuint texGold;         // gold trim
+GLuint texFabric;       // dark-blue fabric (currently active)
+GLuint texDarkPurpleFabric; // alternate dark purple fabric
+GLuint texGold;         // gold trim (currently active)
+GLuint texBrown;        // alternate brown trim
 GLuint texWhiteSleeve;  // arm white sleeve
 GLuint texWhiteLeather; // boot white leather
 GLuint texDarkLeather;  // boot sole
@@ -1637,6 +1683,11 @@ void updateAnimation()
 // Window procedure
 //================================
 
+// Forward declarations for audio helpers (defined near WinMain)
+void playFX(const char* file);
+void playBGM(const char* file);
+void stopBGM();
+
 LRESULT WINAPI ControlWindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -1818,11 +1869,14 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 preK_fanTargetAngle = fanTargetAngle;
                 
                 weapon1_status = false;    // Hide meteor hammer temporarily
+                playFX("Music/fan.mp3");    // Fan throw sound
             }
             break;
 
         case 'P':
             isNight = !isNight;
+            if (isNight) playBGM("Music/bgm.mp3"); // Start night BGM on loop
+            else         stopBGM();               // Stop BGM when returning to day
             break;
 
         case 'B':
@@ -1832,6 +1886,31 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 cachedBodyList = 0;
             }
             break;
+
+        case 'E': {
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                // Shift+E: Toggle textures on/off globally
+                noTextureMode = !noTextureMode;
+            } else {
+                // E: Swap fabric.bmp <-> darkpurplefabric.bmp
+                GLuint tmp  = texFabric;
+                texFabric            = texDarkPurpleFabric;
+                texDarkPurpleFabric  = tmp;
+                // Simultaneously swap gold.bmp <-> brown.bmp
+                tmp      = texGold;
+                texGold  = texBrown;
+                texBrown = tmp;
+            }
+            break;
+        }
+
+        case 'Q': {
+            // Swap ground texture between grass and sand
+            GLuint tmp = texGrass;
+            texGrass   = texSand;
+            texSand    = tmp;
+            break;
+        }
 
         case 'I':
             isWireframe = !isWireframe;
@@ -1850,6 +1929,7 @@ LRESULT WINAPI WindowProcedure(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             if (!jAnimationActive && !kAnimationActive && weapon1_status) {
                 jAnimationActive = true;
                 jAnimProgress = 0.0f;
+                boomScheduledAt = GetTickCount64(); // Schedule boom.mp3 2s from now
                 // Save state
                 preJ_leftArmAngle = leftArmAngle;
                 for(int i=0; i<5; i++) {
@@ -4315,6 +4395,33 @@ void display()
 }
 
 //================================================================
+//  AUDIO helpers  (Windows MCI — supports MP3 natively)
+//================================================================
+
+// One-shot sound effect (fan, boom, etc.)
+void playFX(const char* file) {
+    mciSendStringA("close fx", NULL, 0, NULL);
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "open \"%s\" type mpegvideo alias fx", file);
+    mciSendStringA(cmd, NULL, 0, NULL);
+    mciSendStringA("play fx", NULL, 0, NULL);
+}
+
+// Looping background music
+void playBGM(const char* file) {
+    mciSendStringA("close bgm", NULL, 0, NULL);
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "open \"%s\" type mpegvideo alias bgm", file);
+    mciSendStringA(cmd, NULL, 0, NULL);
+    mciSendStringA("play bgm repeat", NULL, 0, NULL);
+}
+
+void stopBGM() {
+    mciSendStringA("stop bgm", NULL, 0, NULL);
+    mciSendStringA("close bgm", NULL, 0, NULL);
+}
+
+//================================================================
 //  WinMain
 //================================================================
 
@@ -4377,9 +4484,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
 
     // Load all textures
     texGrass        = loadBMP("Textures/grass.bmp");
+    texSand         = loadBMP("Textures/sand.bmp");
     texSkin         = loadBMP("Textures/skin.bmp");
     texFabric       = loadBMP("Textures/fabric.bmp");
+    texDarkPurpleFabric = loadBMP("Textures/darkpurplefabric.bmp");
     texGold         = loadBMP("Textures/gold.bmp");
+    texBrown        = loadBMP("Textures/brown.bmp");
     texWhiteSleeve  = loadBMP("Textures/white_sleeve.bmp");
     texWhiteLeather = loadBMP("Textures/white_leather.bmp");
     texDarkLeather  = loadBMP("Textures/dark_leather.bmp");
@@ -4406,7 +4516,13 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
         }
 
         updateAnimation();
-        
+
+        // Delayed boom sound — fires 2 seconds after J key
+        if (boomScheduledAt > 0 && (GetTickCount64() - boomScheduledAt) >= 2000) {
+            playFX("Music/boom.mp3");
+            boomScheduledAt = 0;
+        }
+
         // Render Main Window
         wglMakeCurrent(hdc, hglrc);
         display();
@@ -4416,6 +4532,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow)
         wglMakeCurrent(hControlDC, hControlRC);
         drawOverlayUI();
         SwapBuffers(hControlDC);
+
+        // Cap frame rate to ~60 FPS to prevent the spin-loop from
+        // consuming 100% CPU. This is the single most impactful fix
+        // and requires no changes to any draw/update function.
+        Sleep(16);
     }
 
     UnregisterClass(WINDOW_TITLE, wc.hInstance);
